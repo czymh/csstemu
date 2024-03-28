@@ -37,10 +37,11 @@ class CEmulator:
               0.50, 0.25, 0.10, 0.00]
     
     def __init__(self, statistic='Pkmm'):
+        self.statistic = statistic
         data_path = data_path = os.path.join(os.path.dirname(os.path.abspath(inspect.stack()[0][1])), 'data/')
         cosmoall = np.load(data_path + 'cosmologies_8d_train_n129_Sobol.npy')
         self.X_train = NormCosmo(cosmoall[:65,:], self.param_names, self.param_limits)
-        if statistic == 'Pkmm':
+        if self.statistic == 'Pkmm':
             nvec = 10
             ### load the PCA transformation matrix
             _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgBk.npy'%nvec)
@@ -62,20 +63,23 @@ class CEmulator:
         else:
             raise ValueError('Statistic %s not supported yet.'%statistic)
 
-    def predict(self, cosmologies, statistic='Pkmm', **kwargs):
-        if statistic == 'Pkmm':
+    def predict(self, cosmologies, **kwargs):
+        if self.statistic == 'Pkmm':
             cosmologies = np.atleast_2d(cosmologies)
+            numcos = cosmologies.shape[0]
+            print('Predicting %d cosmologies...'%numcos)
             nvec = 10
             ncosmo = NormCosmo(cosmologies, self.param_names, self.param_limits)
             ## Gaussian Process Regression
-            Bkpred = np.zeros(nvec)
+            Bkpred = np.zeros((numcos, nvec))
             for ivec in range(nvec):
-                Bkpred[ivec] = self.__GPR[ivec].predict(ncosmo)
+                Bkpred[:,ivec] = self.__GPR[ivec].predict(ncosmo)
             ## PCA inverse transform
             Bkpred = 10**np.dot(Bkpred, self.__PCA_components) + self.__PCA_mean
+            Bkpred = Bkpred.reshape(numcos, len(self.zlists), -1)
             return Bkpred
         else:
-            raise ValueError('Statistic %s not supported yet.'%statistic)
+            raise ValueError('Statistic %s not supported yet.'%self.statistic)
         
         
         
