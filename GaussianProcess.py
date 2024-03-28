@@ -237,5 +237,7 @@ class GaussianProcessRegressor:
             if y_var.shape[1] == 1:
                 y_var = np.squeeze(y_var, axis=1)
             return y_mean, np.sqrt(y_var)
+        else:
+            return y_mean
 
 
