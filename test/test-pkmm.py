@@ -2,7 +2,7 @@
 %config InlineBackend.figure_format = 'retina'
 import sys
 sys.path.append(path + './csstemu/CEmulator')
-from Emulator import CEmulator
+from CEmulator.Emulator import CEmulator
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, Normalize
