@@ -1,4 +1,3 @@
-from networkx import non_edges
 import numpy as np
 import os
 import inspect
@@ -177,7 +176,7 @@ class CEmulator:
         ## check the input redshift and wavenumber
         self.check_z(z)
         self.check_k(k)
-        
+
         numcos = self.cosmologies.shape[0]
         print('Predicting Bk of %d cosmologies...'%numcos)
         ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
@@ -186,19 +185,22 @@ class CEmulator:
         for ivec in range(self.nvec):
             Bkpred[:,ivec] = self.__GPR[ivec].predict(ncosmo)
         ## PCA inverse transform
-        Bkpred = 10**np.dot(Bkpred, self.__PCA_components) + self.__PCA_mean
+        Bkpred = 10**((Bkpred @ self.__PCA_components) + self.__PCA_mean)
         Bkpred = Bkpred.reshape(numcos, len(self.zlists), len(self.klist))
+        Bkpred = Bkpred[:,::-1,:]
+        Bkout  = np.zeros_like(Bkpred)
         ### z space use cubic spline while k space use linear interpolation
         for ic in range(numcos):
-            spline = RectBivariateSpline(self.zlists[::-1], self.klist, Bkpred[ic], 
+            spline    = RectBivariateSpline(self.zlists[::-1], self.klist, Bkpred[ic], 
                                             kx=3, ky=1)
-            Bkpred[ic] = spline(self.zinput, self.kinput)
-        return Bkpred
+            Bkout[ic] = spline(self.zinput, self.kinput)
+        return Bkout
     
-    def get_cosmos_class(self, z=None):
+    def get_cosmos_class(self, z=None, non_linear=None):
         '''
         Get the CLASS cosmology object.
         z : float or array-like, redshift
+        non_linear: 'halofit' or 'HMcode'
         '''
         self.check_z(z)
         
@@ -209,7 +211,7 @@ class CEmulator:
                 str_zlists += ", {:.4f}".format(self.zinput[i_z+1])
         self.cosmo_class_arr = np.zeros((numcos,), dtype=object)
         for ic in range(numcos):
-            self.cosmo_class_arr[ic] = useCLASS(self.cosmologies[ic], str_zlists)
+            self.cosmo_class_arr[ic] = useCLASS(self.cosmologies[ic], str_zlists, non_linear=non_linear)
         return self.cosmo_class_arr
     
     def get_pklin(self, z=None, k=None, type='CLASS', Pcb=True):

@@ -9,6 +9,6 @@ Up to now, the supportted statistics include:
 2. blabla
 3. 
 
-
+![A matter power spectrum example]('./test/pic/c0065_pk.png')
 
 
