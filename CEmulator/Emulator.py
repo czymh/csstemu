@@ -188,7 +188,7 @@ class CEmulator:
         Bkpred = 10**((Bkpred @ self.__PCA_components) + self.__PCA_mean)
         Bkpred = Bkpred.reshape(numcos, len(self.zlists), len(self.klist))
         Bkpred = Bkpred[:,::-1,:]
-        Bkout  = np.zeros_like(Bkpred)
+        Bkout  = np.zeros((Bkpred.shape[0], len(self.zinput), len(self.kinput)))
         ### z space use cubic spline while k space use linear interpolation
         for ic in range(numcos):
             spline    = RectBivariateSpline(self.zlists[::-1], self.klist, Bkpred[ic], 
