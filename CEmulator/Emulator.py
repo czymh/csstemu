@@ -72,17 +72,18 @@ class CEmulator:
               1.50, 1.25, 1.00, 0.80, \
               0.50, 0.25, 0.10, 0.00]
     
-    def __init__(self, statistic='Pkmm'):
+    def __init__(self, statistic='Pkmm', n_sample=65):
         self.statistic = statistic
         data_path = data_path = os.path.join(os.path.dirname(os.path.abspath(inspect.stack()[0][1])), 'data/')
         cosmoall = np.load(data_path + 'cosmologies_8d_train_n129_Sobol.npy')
-        self.X_train = NormCosmo(cosmoall[:65,:], self.param_names, self.param_limits)
+        self.X_train = NormCosmo(cosmoall[:n_sample,:], self.param_names, self.param_limits)
         if self.statistic == 'Pkmm':
             print('Loading the Pkmm emulator...')
+            print('Using %d training samples.'%n_sample)
             self.Pkmmload = True
             self.nvec = 10
             ### load the PCA transformation matrix
-            _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgBk.npy'%self.nvec)
+            _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgBk_n%d.npy'%(self.nvec, n_sample))
             self.__PCA_mean = _tmp[0,:]
             self.__PCA_components = _tmp[1:,:]
             ### load karr
@@ -92,8 +93,8 @@ class CEmulator:
             self.klist = self.klist[ind]
             ### Load the Gaussian Process Regression model
             self.__GPR = np.zeros(self.nvec, dtype=object)
-            gprinfo    = np.load(data_path + 'lgBk_gpr_kernel_nvec%d_n65_nb_Nmesh3072.npy'%self.nvec, allow_pickle=True)
-            Bkcoeff    = np.load(data_path + 'lgBk_coeff_nvec%d_n65_nb_Nmesh3072.npy'%self.nvec)
+            gprinfo    = np.load(data_path + 'lgBk_gpr_kernel_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample), allow_pickle=True)
+            Bkcoeff    = np.load(data_path + 'lgBk_coeff_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample))
             for ivec in range(self.nvec):
                 k1    = czConstant(gprinfo[ivec]['k1__constant_value'])
                 k2    = czRBF(gprinfo[ivec]['k2__length_scale'])
