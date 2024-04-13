@@ -2,7 +2,7 @@ import numpy as np
 import os
 import inspect
 from GaussianProcess import GaussianProcessRegressor, czConstant, czRBF
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, interp1d
             
 def NormCosmo(cosmologies, param_names, param_limits):
     '''
@@ -24,7 +24,7 @@ def useCLASS(mypara, strzlists, non_linear=None):
     for i_n in range(len(param_names)):
         para[param_names[i_n]] = mypara[i_n]
     params = {
-        'output': 'mPk', 
+        'output': 'mPk, mTk', 
         'P_k_max_1/Mpc': 20,
         'A_s':       para['A']*1e-9,
         'n_s':       para['ns'], 
@@ -230,13 +230,12 @@ class CEmulator:
             if self.cosmo_class_arr is None:
                 self.get_cosmos_class(z)
             numcos = self.cosmologies.shape[0]
-            if Pcb and self.cosmo_class_arr[0].Omega_nu != 0:
-                print('Only cb-component linear power spectrum is calculated.')
-                pkfunc = self.cosmo_class_arr[0].pk_cb_lin
-            else:
-                pkfunc = self.cosmo_class_arr[0].pk_lin
             pklin = np.zeros((numcos, len(self.zinput), len(self.kinput)))
             for ic in range(numcos):
+                if Pcb and self.cosmo_class_arr[ic].Omega_nu != 0:
+                    pkfunc = self.cosmo_class_arr[ic].pk_cb_lin
+                else:
+                    pkfunc = self.cosmo_class_arr[ic].pk_lin
                 h0 = self.cosmo_class_arr[ic].h()
                 for iz in range(len(self.zinput)):
                     pklin[ic, iz] = np.array([pkfunc(ik*h0, self.zinput[iz])*h0*h0*h0 
@@ -252,19 +251,35 @@ class CEmulator:
         k : float or array-like, wavenumber [h/Mpc]
         type : string, 'CLASS' or 'symbolic_pofk'
         '''
-        ## get the linear power spectrum
-        if   lintype == 'CLASS':
-            pklin = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
-        else:
-            raise ValueError('Type %s not supported yet.'%lintype)
-        ## get the nonlinear transfer
+        ## get the nonlinear transfer for Pcb
         Bkpred = self.get_Bk(z, k)
-        pknl = pklin * Bkpred
+        ## get the linear power spectrum for cb
+        pkcblin = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
+        if Pcb:
+            pknl = pkcblin * Bkpred
+        else:
+            pknl   = np.zeros_like(pkcblin)
+            h0     = self.cosmo_class_arr[0].h()
+            # pklin  = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
+            pkcbnl = pkcblin * Bkpred
+            numcos = self.cosmologies.shape[0]
+            for ic in range(numcos):
+                if self.cosmo_class_arr[ic].Omega_nu != 0:
+                    for iz in range(len(self.zinput)):
+                        tkall = self.cosmo_class_arr[ic].get_transfer(z=self.zinput[iz])
+                        # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='linear')
+                        Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='linear')
+                        fb2cb = self.cosmo_class_arr[ic].Omega_b()/(self.cosmo_class_arr[ic].Omega0_cdm()+self.cosmo_class_arr[ic].Omega_b())
+                        fc2cb = self.cosmo_class_arr[ic].Omega0_cdm()/(self.cosmo_class_arr[ic].Omega0_cdm()+self.cosmo_class_arr[ic].Omega_b())
+                        Tkcb  = fc2cb*tkall['d_cdm']+fb2cb*tkall['d_b']
+                        Tkcb_interp = interp1d(tkall['k (h/Mpc)'], Tkcb, kind='linear')
+                        fnu   = self.cosmo_class_arr[ic].Omega_nu/self.cosmo_class_arr[ic].Omega_m()
+                        # Tkcb_nu_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*Tkcb, kind='linear')
+                        ## use the linear neutrino power spectrum to calculate the nonlinear total power spectrum
+                        pknunulin = pkcblin[ic,iz]/Tkcb_interp(self.kinput)/Tkcb_interp(self.kinput) * Tknusquare_interp(self.kinput)
+                        pknl[ic,iz] = (1-fnu)**2*pkcbnl[ic,iz] + fnu*fnu*pknunulin + 2*fnu*(1-fnu)*np.sqrt(pkcbnl[ic,iz]*pknunulin)
+                else:
+                    pknl[ic] = pkcblin[ic] * Bkpred[ic]                            
         return pknl
         
-        
-        
-        
-
-    
-    
+ 
