@@ -2,6 +2,7 @@ import numpy as np
 from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
+from .cosmology import Cosmology
 from .emulator.Bkmm import Bkmm_gp
 from .emulator.PkcbLin import PkcbLin_gp
 from .emulator.Xihm import XihmMassBin_gp
@@ -18,6 +19,7 @@ class CEmulator:
     zlists       = zlists    
     def __init__(self, verbose=False):
         self.verbose = verbose
+        self.Cosmo        = Cosmology(verbose=verbose)
         self.Bkmm         = Bkmm_gp(verbose=verbose)  
         self.Pkmmlin      = PkcbLin_gp(verbose=verbose) 
         self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
@@ -27,9 +29,17 @@ class CEmulator:
         
     def set_cosmos(self, Omegab=0.04897468, Omegam=0.30969282, 
                    H0=67.66, As=2.105e-9, ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06, z=0.0):
+                   mnu=0.06):
         '''
         Set the cosmological parameters. You can input the float or array-like.
+        Omegab : float or array-like, baryon density
+        Omegam : float or array-like, Only baryon and CDM density
+        H0     : float or array-like, Hubble constant
+        As     : float or array-like, amplitude of the primordial power spectrum
+        ns     : float or array-like, spectral index
+        w      : float or array-like, dark energy equation of state
+        wa     : float or array-like, dark energy equation of state evolution
+        mnu    : float or array-like, sum of neutrino masses with unit eV
         '''
         cosmos = {}
         cosmos['Omegab'] = np.atleast_1d(Omegab)
@@ -40,6 +50,7 @@ class CEmulator:
         cosmos['w']      = np.atleast_1d(w)
         cosmos['wa']     = np.atleast_1d(wa)
         cosmos['mnu']    = np.atleast_1d(mnu)
+        # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
         n_params = len(self.param_names)
         ## check the parameter range
         lenlists = np.zeros((n_params), dtype=int)
@@ -52,6 +63,8 @@ class CEmulator:
         if numcosmos.size > 1:
             raise ValueError('Inconsistent parameter array length.')
         numcosmos = numcosmos[0]
+        ### set the cosmology class
+        self.Cosmo.set_cosmos(cosmos)
         ## into the cosmologies array
         self.cosmologies = np.zeros((numcosmos, n_params))
         for ind, ikey in enumerate(self.param_names):
