@@ -7,12 +7,12 @@ class Bkmm_gp:
     zlists = zlists 
     def __init__(self, verbose=False):
         self.verbose = verbose
-        n_sample = 65
+        n_sample = 129
         if self.verbose:
             print('Loading the Pkmm emulator...')
             print('Using %d training samples.'%n_sample)
         self.X_train = cosmoNorm[:n_sample,:]
-        self.nvec = 10
+        self.nvec = 15
         ### load the PCA transformation matrix
         _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgBk_n%d.npy'%(self.nvec, n_sample))
         self.__PCA_mean = _tmp[0,:]
@@ -26,14 +26,21 @@ class Bkmm_gp:
         self.__GPR = np.zeros(self.nvec, dtype=object)
         gprinfo    = np.load(data_path + 'lgBk_gpr_kernel_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample), allow_pickle=True)
         Bkcoeff    = np.load(data_path + 'lgBk_coeff_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample))
+        self.NormBeforeGP = True
+        if self.NormBeforeGP:
+            self.Bkcoeff_std = np.std(Bkcoeff, axis=0)
         for ivec in range(self.nvec):
             k1    = Constant(gprinfo[ivec]['k1__constant_value'])
             k2    = RBF(gprinfo[ivec]['k2__length_scale'])
             kivec = k1 * k2
             alpha = 1e-10
             ynorm = True
-            self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
-                                                        kernel=kivec, alpha=alpha, normalize_y=ynorm)
+            if self.NormBeforeGP:
+                self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec]/self.Bkcoeff_std[ivec], 
+                                                            kernel=kivec, alpha=alpha, normalize_y=ynorm)
+            else:
+                self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
+                                                            kernel=kivec, alpha=alpha, normalize_y=ynorm)
         ### End of __init__
     
     def get_Bk(self, z=None, k=None):
@@ -52,6 +59,8 @@ class Bkmm_gp:
         Bkpred = np.zeros((numcos, self.nvec))
         for ivec in range(self.nvec):
             Bkpred[:,ivec] = self.__GPR[ivec].predict(self.ncosmo)
+            if self.NormBeforeGP:
+                Bkpred[:,ivec] = Bkpred[:,ivec] * self.Bkcoeff_std[ivec]
         ## PCA inverse transform
         Bkpred = 10**((Bkpred @ self.__PCA_components) + self.__PCA_mean)
         Bkpred = Bkpred.reshape(numcos, len(self.zlists), len(self.klist))

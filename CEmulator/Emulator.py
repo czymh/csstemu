@@ -24,8 +24,7 @@ class CEmulator:
         self.Pkmmlin      = PkcbLin_gp(verbose=verbose) 
         self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
         self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
-        #### some vals
-        self.cosmo_class_arr = None
+        
         
     def set_cosmos(self, Omegab=0.04897468, Omegam=0.30969282, 
                    H0=67.66, As=2.105e-9, ns=0.9665, w=-1.0, wa=0.0, 
@@ -77,6 +76,9 @@ class CEmulator:
         self.Pkmmlin.ncosmo     = self.ncosmo  
         self.XihmMassBin.ncosmo = self.ncosmo
         self.PkhmMassBin.ncosmo = self.ncosmo
+        #### from init move to here 
+        #### refresh the cosmology class for each cosmology set 
+        self.cosmo_class_arr = None
                     
     def get_cosmos_class(self, z=None, non_linear=None):
         '''
