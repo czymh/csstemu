@@ -45,7 +45,7 @@ class Cosmology:
                                           self.OmegaR*(1+z[iz])**4 + 
                                           self.OmegaL*np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz]))))
                                          )
-        return np.squeeze(out)
+        return out
     
     def get_Omegam(self, z):
         '''
@@ -56,7 +56,7 @@ class Cosmology:
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
             out[:,iz] = self.Omegam * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
-        return np.squeeze(out)
+        return out
     
     def get_OmegaM(self, z):
         '''
@@ -67,7 +67,7 @@ class Cosmology:
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
             out[:,iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
-        return np.squeeze(out)
+        return out
     
     def get_OmegaL(self, z):
         '''
@@ -78,6 +78,6 @@ class Cosmology:
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
             out[:,iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_hubble(z[iz])**2 * self.h0**2
-        return np.squeeze(out)
+        return out
     
     

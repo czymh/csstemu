@@ -3,7 +3,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
-from .emulator.Bkmm import Bkmm_gp
+from .emulator.Bkmm import Bkmm_gp, Bkmm_halofit_gp
 from .emulator.PkcbLin import PkcbLin_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
@@ -20,7 +20,8 @@ class CEmulator:
     def __init__(self, verbose=False):
         self.verbose = verbose
         self.Cosmo        = Cosmology(verbose=verbose)
-        self.Bkmm         = Bkmm_gp(verbose=verbose)  
+        self.Bkmm         = Bkmm_gp(verbose=verbose) 
+        self.Bkmm_halofit = Bkmm_halofit_gp(verbose=verbose) 
         self.Pkmmlin      = PkcbLin_gp(verbose=verbose) 
         self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
         self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
@@ -72,10 +73,11 @@ class CEmulator:
         self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
         
         ### pass the cosmologies (normalized) to other class
-        self.Bkmm.ncosmo        = self.ncosmo 
-        self.Pkmmlin.ncosmo     = self.ncosmo  
-        self.XihmMassBin.ncosmo = self.ncosmo
-        self.PkhmMassBin.ncosmo = self.ncosmo
+        self.Bkmm.ncosmo         = self.ncosmo 
+        self.Bkmm_halofit.ncosmo = self.ncosmo
+        self.Pkmmlin.ncosmo      = self.ncosmo  
+        self.XihmMassBin.ncosmo  = self.ncosmo
+        self.PkhmMassBin.ncosmo  = self.ncosmo
         
         self.numcos = self.cosmologies.shape[0]
         #### from init move to here 
@@ -188,19 +190,38 @@ class CEmulator:
                                              an, bn, cn, gamman, alphan, betan, mun, nun)
         return pkhalofit
         
-    def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS'):
+    def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS', nltype='linear'):
         '''
         Get the nonlinear power spectrum.
         z : float or array-like, redshift
         k : float or array-like, wavenumber [h/Mpc]
         lintype : string, 'CLASS' or 'Emulator'
+        nltype  : string, 'linear' or 'halofit' 
+                  'linear' means ratio of nonlinear to linear power spectrum
+                  'halofit' means ratio of nonlinear to halofit power spectrum
         '''
         z = check_z(self.zlists,     z)
         k = check_k(self.Bkmm.klist, k)
-        ## get the nonlinear transfer for Pcb
-        Bkpred = self.Bkmm.get_Bk(z, k)
-        ## get the linear power spectrum for cb
-        pkcblin = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
+        if   nltype == 'linear':
+            ## get the nonlinear transfer for Pcb
+            Bkpred = self.Bkmm.get_Bk(z, k)
+            ## get the linear power spectrum for cb
+            pkcblin = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
+        elif nltype == 'halofit':
+            ## get the nonlinear transfer for Pcb
+            Bkpred = self.Bkmm_halofit.get_Bk(z, k)
+            ## get the halofit power spectrum for cb
+            if   lintype == 'Emulator':
+                pkcblin = self.get_pkhalofit(z, k, Pcb=Pcb, lintype=lintype)
+            elif lintype == 'CLASS':
+                if self.cosmo_class_arr is None:
+                    self.get_cosmos_class(z, non_linear='halofit')
+                pkcblin = np.zeros((self.numcos, len(z), len(k)))
+                for ic in range(self.numcos):
+                    h0 = self.cosmo_class_arr[ic].h()
+                    for iz in range(len(z)):
+                        pkcblin[ic,iz] = np.array([self.cosmo_class_arr[ic].pk_cb(ik*h0, z[iz])*h0*h0*h0 
+                                                   for ik in list(k)])
         if Pcb:
             pknl = pkcblin * Bkpred
         else:

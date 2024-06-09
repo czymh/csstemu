@@ -53,6 +53,28 @@ def NormCosmo(cosmologies, param_names, param_limits):
         ncosmo[:,i] = (cosmologies[:,i] - param_limits[param][0]) / (param_limits[param][1] - param_limits[param][0])
     return ncosmo
 
+class MyStandardScaler:
+    def __init__(self):
+        self.mean_ = None
+        self.scale_ = None
+
+    def fit(self, X):
+        '''
+        X must be (nparam, nvec) array
+        '''
+        self.mean_  = np.mean(X, axis=0)
+        self.scale_ = np.std (X, axis=0)
+
+    def transform(self, X):
+        return np.array([(X[:,ivec]-self.mean_[ivec])/self.scale_[ivec] for ivec in range(X.shape[1])]).T
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, Y):
+        return np.array([Y[:,ivec] * self.scale_[ivec] + self.mean_[ivec] for ivec in range(Y.shape[1])]).T
+
 def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0):
     from classy import Class
     param_names  = ['Omegab', 'Omegam', 'H0', \
