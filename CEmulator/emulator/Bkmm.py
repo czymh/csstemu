@@ -101,10 +101,10 @@ class Bkmm_halofit_gp:
         Bkcoeff    = np.load(data_path + 'Bk_halofit_coeff_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample))
         self.NormBeforeGP = True
         if self.NormBeforeGP:
-            coeffSS = MyStandardScaler()
-            paramSS = MyStandardScaler()
-            Bkcoeff = coeffSS.fit_transform(Bkcoeff)
-            self.X_train = paramSS.fit_transform(self.X_train)
+            self.coeffSS = MyStandardScaler()
+            self.paramSS = MyStandardScaler()
+            Bkcoeff = self.coeffSS.fit_transform(Bkcoeff)
+            self.X_train = self.paramSS.fit_transform(self.X_train)
         for ivec in range(self.nvec):
             k1    = Constant(gprinfo[ivec]['k1__constant_value'])
             k2    = RBF(gprinfo[ivec]['k2__length_scale'])
