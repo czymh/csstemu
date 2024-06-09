@@ -53,11 +53,13 @@ class PkcbLin_gp:
         if self.verbose:
             print('Predicting PkcbLin of %d cosmologies...'%numcos)
         if self.NormBeforeGP:
-            self.ncosmo = self.paramSS.transform(self.ncosmo)
+            Normcosmo = self.paramSS.transform(self.ncosmo)
+        else:
+            Normcosmo = np.copy(self.ncosmo)
         ## Gaussian Process Regression
         pkpred = np.zeros((numcos, self.nvec))
         for ivec in range(self.nvec):
-            pkpred[:,ivec] = self.__GPR[ivec].predict(self.ncosmo)
+            pkpred[:,ivec] = self.__GPR[ivec].predict(Normcosmo)
         if self.NormBeforeGP:
             pkpred = self.pkcoeffSS.inverse_transform(pkpred)
         ## PCA inverse transform

@@ -186,7 +186,7 @@ def compute_Rsigma_neff_C(Pklin):
         if xlogr2 < -1.9999:
             # is still linear, exit
             break
-        elif xlogr2 > 3.4999:
+        elif xlogr1 > 3.4999:
             # Totally crazy non-linear
             raise ValueError('Error in halofit')
     neff = rneff
