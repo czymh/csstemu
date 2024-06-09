@@ -76,44 +76,48 @@ class CEmulator:
         self.Pkmmlin.ncosmo     = self.ncosmo  
         self.XihmMassBin.ncosmo = self.ncosmo
         self.PkhmMassBin.ncosmo = self.ncosmo
+        
+        self.numcos = self.cosmologies.shape[0]
         #### from init move to here 
         #### refresh the cosmology class for each cosmology set 
         self.cosmo_class_arr = None
                     
-    def get_cosmos_class(self, z=None, non_linear=None):
+    def get_cosmos_class(self, z=None, non_linear=None, kmax=10):
         '''
         Get the CLASS cosmology object.
         z : float or array-like, redshift
         non_linear: 'halofit' or 'HMcode'
         '''
         # check_z(z)
-        numcos = self.cosmologies.shape[0]
         str_zlists = "{:.4f}".format(z[0])
         if len(z) > 1:
             for i_z in range(len(z) - 1):
                 str_zlists += ", {:.4f}".format(z[i_z+1])
-        self.cosmo_class_arr = np.zeros((numcos,), dtype=object)
-        for ic in range(numcos):
-            self.cosmo_class_arr[ic] = useCLASS(self.cosmologies[ic], str_zlists, non_linear=non_linear)
+        self.cosmo_class_arr = np.zeros((self.numcos,), dtype=object)
+        for ic in range(self.numcos):
+            self.cosmo_class_arr[ic] = useCLASS(self.cosmologies[ic], str_zlists, non_linear=non_linear, kmax=kmax)
         return True
     
-    def get_pklin(self, z=None, k=None, type='CLASS', Pcb=True):
+    def get_pklin(self, z=None, k=None, type='CLASS', Pcb=True, kmax=10):
         '''
         Get the linear power spectrum.
+        
+        Parameters
+        ----------
         z : float or array-like, redshift
         k : float or array-like, wavenumber [h/Mpc]
         type : string, 'CLASS' or 'Emulator'
         Pcb  : bool, whether to output the total power spectrum (if False) or 
                the cb power spectrum (if True [default])
+        kmax : float, maximum wavenumber [h/Mpc] for CLASS
         '''
         z = check_z(self.zlists,     z)
         # k = check_k(self.Bkmm.klist, k)
         if   type == 'CLASS':
             if self.cosmo_class_arr is None:
-                self.get_cosmos_class(z)
-            numcos = self.cosmologies.shape[0]
-            pklin = np.zeros((numcos, len(z), len(k)))
-            for ic in range(numcos):
+                self.get_cosmos_class(z, kmax=kmax)
+            pklin = np.zeros((self.numcos, len(z), len(k)))
+            for ic in range(self.numcos):
                 if Pcb and self.cosmo_class_arr[ic].Omega_nu != 0:
                     pkfunc = self.cosmo_class_arr[ic].pk_cb_lin
                 else:
@@ -130,7 +134,60 @@ class CEmulator:
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
-    
+        
+    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS'):
+        '''
+        Get the halofit power spectrum.
+        ******
+        Notice This version can not converge with CLASS in the high redshift (z>2.5)
+        for the c0001 and c0091 (w0 and wa near the lower limit).
+        ******
+        z : float or array-like, redshift
+        k : float or array-like, wavenumber [h/Mpc]
+        Pcb : bool, whether to output the total power spectrum (if False) or 
+              the cb power spectrum (if True [default])
+        lintype : string, 'CLASS' or 'Emulator'
+        '''
+        z = check_z(self.zlists,     z)
+        if Pcb:
+            fnuall = np.zeros((self.numcos))
+        else:
+            fnuall = self.Cosmo.Omeganu/(self.Cosmo.Omegam + self.Cosmo.Omeganu)
+        OmegaLzall = self.Cosmo.get_OmegaL(z)
+        OmegaMzall = self.Cosmo.get_OmegaM(z)
+        pkhalofit  = np.zeros((self.numcos, len(z), len(k)))
+        kinterp    = np.logspace(-5, 1, 1024)
+        pklinintp  = self.get_pklin(z, kinterp, type=lintype, Pcb=Pcb, kmax=kinterp.max())
+        for ic in range(self.numcos):
+            fnu = fnuall[ic]
+            for iz in range(len(z)):
+                OmegaLz = OmegaLzall[ic,iz]
+                OmegaMz = OmegaMzall[ic,iz]
+                w_eff   = self.Cosmo.w0[ic] + self.Cosmo.wa[ic]*(z[iz]/(1+z[iz]))
+                Pklin = lambda k: 10**interp1d(np.log10(kinterp), 
+                                               np.log10(pklinintp[ic,iz]),
+                                               kind='slinear', 
+                                               fill_value="extrapolate")(np.log10(k))
+                R_sigma, neff, Curv = compute_Rsigma_neff_C(Pklin)
+                an = 10.**( 1.5222 + 2.8553*neff + 2.3706*neff*neff
+                + 0.9903*neff*neff*neff + 0.2250*neff*neff*neff*neff \
+                - 0.6038*Curv + 0.1749*OmegaLz*(1.+w_eff) ) 
+                bn = 10.**(-0.5642 + 0.5864*neff + 0.5716*neff*neff \
+                - 1.5474*Curv + 0.2279*OmegaLz*(1.+w_eff) ) 
+                cn = 10.**( 0.3698 + 2.0404*neff + 0.8161*neff*neff \
+                + 0.5869*Curv)
+                gamman = 0.1971 - 0.0843*neff + 0.8460*Curv  
+                alphan = np.abs( 6.0835 + 1.3373*neff - 0.1959*neff*neff - 5.5274*Curv)
+                betan  = 2.0379 - 0.7354*neff + 0.3157*neff*neff \
+                    + 1.2490*neff*neff*neff + 0.3980*neff*neff*neff*neff \
+                    - 0.1682*Curv \
+                    + fnu*(1.081 + 0.395*neff*neff)
+                mun    = 0.
+                nun    = 10.**(5.2105 + 3.6902*neff)
+                pkhalofit[ic,iz] = PkHaloFit(k, Pklin(k), R_sigma, OmegaMz, OmegaLz, fnu, \
+                                             an, bn, cn, gamman, alphan, betan, mun, nun)
+        return pkhalofit
+        
     def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS'):
         '''
         Get the nonlinear power spectrum.
@@ -154,8 +211,7 @@ class CEmulator:
                 h0     = self.cosmo_class_arr[0].h()
                 # pklin  = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
                 pkcbnl = pkcblin * Bkpred
-                numcos = self.cosmologies.shape[0]
-                for ic in range(numcos):
+                for ic in range(self.numcos):
                     if self.cosmo_class_arr[ic].Omega_nu != 0:
                         for iz in range(len(z)):
                             tkall = self.cosmo_class_arr[ic].get_transfer(z=z[iz])
