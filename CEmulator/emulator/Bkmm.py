@@ -55,11 +55,13 @@ class Bkmm_gp:
         if self.verbose:
             print('Predicting Bk of %d cosmologies...'%numcos)
         if self.NormBeforeGP:
-            self.ncosmo = self.paramSS.transform(self.ncosmo)
+            Normcosmo = self.paramSS.transform(self.ncosmo)
+        else:
+            Normcosmo = np.copy(self.ncosmo)
         ## Gaussian Process Regression
         Bkpred = np.zeros((numcos, self.nvec))
         for ivec in range(self.nvec):
-            Bkpred[:,ivec] = self.__GPR[ivec].predict(self.ncosmo)
+            Bkpred[:,ivec] = self.__GPR[ivec].predict(Normcosmo)
         if self.NormBeforeGP:
             Bkpred = self.coeffSS.inverse_transform(Bkpred)
         ## PCA inverse transform
@@ -99,27 +101,18 @@ class Bkmm_halofit_gp:
         Bkcoeff    = np.load(data_path + 'Bk_halofit_coeff_nvec%d_n%d_nb_Nmesh3072.npy'%(self.nvec,n_sample))
         self.NormBeforeGP = True
         if self.NormBeforeGP:
-            self.Bkcoeff_mean = np.mean(Bkcoeff, axis=0)
-            self.Bkcoeff_std  = np.std (Bkcoeff, axis=0)
-        
-        if self.NormBeforeGP:
-            for ivec in range(self.nvec):
-                k1    = Constant(gprinfo[ivec]['k1__constant_value'])
-                k2    = RBF(gprinfo[ivec]['k2__length_scale'])
-                kivec = k1 * k2
-                alpha = 1e-10
-                ynorm = True
-                self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, (Bkcoeff[:,ivec]-self.Bkcoeff_mean[ivec])/self.Bkcoeff_std[ivec], 
-                                                            kernel=kivec, alpha=alpha, normalize_y=ynorm)
-        else:
-            for ivec in range(self.nvec):
-                k1    = Constant(gprinfo[ivec]['k1__constant_value'])
-                k2    = RBF(gprinfo[ivec]['k2__length_scale'])
-                kivec = k1 * k2
-                alpha = 1e-10
-                ynorm = True
-                self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
-                                                            kernel=kivec, alpha=alpha, normalize_y=ynorm)
+            coeffSS = MyStandardScaler()
+            paramSS = MyStandardScaler()
+            Bkcoeff = coeffSS.fit_transform(Bkcoeff)
+            self.X_train = paramSS.fit_transform(self.X_train)
+        for ivec in range(self.nvec):
+            k1    = Constant(gprinfo[ivec]['k1__constant_value'])
+            k2    = RBF(gprinfo[ivec]['k2__length_scale'])
+            kivec = k1 * k2
+            alpha = 1e-10
+            ynorm = True
+            self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
+                                                        kernel=kivec, alpha=alpha, normalize_y=ynorm)
         ### End of __init__
     
     def get_Bk(self, z=None, k=None):
@@ -134,12 +127,16 @@ class Bkmm_halofit_gp:
         numcos = self.ncosmo.shape[0]
         if self.verbose:
             print('Predicting Bk_halofit of %d cosmologies...'%numcos)
+        if self.NormBeforeGP:
+            Normcosmo = self.paramSS.transform(self.ncosmo)
+        else:
+            Normcosmo = np.copy(self.ncosmo)
         ## Gaussian Process Regression
         Bkpred = np.zeros((numcos, self.nvec))
         for ivec in range(self.nvec):
-            Bkpred[:,ivec] = self.__GPR[ivec].predict(self.ncosmo)
-            if self.NormBeforeGP:
-                Bkpred[:,ivec] = Bkpred[:,ivec] * self.Bkcoeff_std[ivec] + self.Bkcoeff_mean[ivec]
+            Bkpred[:,ivec] = self.__GPR[ivec].predict(Normcosmo)
+        if self.NormBeforeGP:
+            Bkpred = self.coeffSS.inverse_transform(Bkpred)
         ## PCA inverse transform
         Bkpred = ((Bkpred @ self.__PCA_components) + self.__PCA_mean)
         Bkpred = Bkpred.reshape(numcos, len(self.zlists), len(self.klist))

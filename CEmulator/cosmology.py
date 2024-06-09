@@ -33,18 +33,18 @@ class Cosmology:
         self.OmegaL  = 1 - self.Omegam - self.Omeganu - self.OmegaR
         self.Ncosmo  = len(self.Omegam)
         
-    def get_hubble(self, z):
+    def get_Ez(self, z):
         '''
-        Get the Hubble parameter H(z) at redshift z.
+        Get the normalized Hubble parameter H(z) at redshift z.
         z : float or array-like, redshift
         '''
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
-            out[:,iz] = self.h0 * np.sqrt(self.Omegam*(1+z[iz])**3 + 
-                                          self.OmegaR*(1+z[iz])**4 + 
-                                          self.OmegaL*np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz]))))
-                                         )
+            out[:,iz] = np.sqrt((self.Omegam+self.Omeganu)*(1+z[iz])**3 + 
+                                self.OmegaR*(1+z[iz])**4 + 
+                                self.OmegaL*np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz]))))
+                                )
         return out
     
     def get_Omegam(self, z):
@@ -55,7 +55,7 @@ class Cosmology:
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
-            out[:,iz] = self.Omegam * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
+            out[:,iz] = self.Omegam * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     def get_OmegaM(self, z):
@@ -66,7 +66,7 @@ class Cosmology:
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
-            out[:,iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
+            out[:,iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     def get_OmegaL(self, z):
@@ -77,7 +77,7 @@ class Cosmology:
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
         for iz in range(len(z)):
-            out[:,iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_hubble(z[iz])**2 * self.h0**2
+            out[:,iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     
