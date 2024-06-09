@@ -7,11 +7,14 @@ class Cosmology:
         '''
         set the cosmologies for the cosmology class
         '''
+        Neff = 3.046
         self.mnu     = cosmologies['mnu'] # eV
         # number of ultra-relativistic neutrinos
-        self.Nur     = 2*np.ones_like(self.mnu)
-        self.Nur[self.mnu == 0] = 3 
-        self.Nncdm   = 1 - self.Nur
+        self.Nur     = 2.0328*np.ones_like(self.mnu)
+        self.Nur[self.mnu == 0] = Neff
+        self.Nncdm   = np.ones_like(self.mnu)
+        self.Nncdm[self.mnu == 0] = 0
+        ### only support one massive neutrino
         self.h0      = cosmologies['H0'] / 100
         self.Omeganu = self.mnu/93.14/self.h0/self.h0
         # total matter without massive neutrinos
@@ -23,10 +26,58 @@ class Cosmology:
         self.wa      = cosmologies['wa']
         self.ns      = cosmologies['ns']
         self.As      = cosmologies['A'] * 1e-9
-        self.Omegag  = 2.4735e-5 * self.h0**2 # photon radiation
+        self.Omegag  = 2.4735e-5 / self.h0**2 # photon radiation
         Gamma_nu = (4/11)**(1/3)
         f_nnu = 7/8*(Gamma_nu**4)*self.Nur # neutrino radiation
-        self.OmegaR  = self.Omegag*(1+f_nnu)
+        self.OmegaR  = self.Omegag*(1+f_nnu) # Total radiation
         self.OmegaL  = 1 - self.Omegam - self.Omeganu - self.OmegaR
+        self.Ncosmo  = len(self.Omegam)
         
-        
+    def get_hubble(self, z):
+        '''
+        Get the Hubble parameter H(z) at redshift z.
+        z : float or array-like, redshift
+        '''
+        z = np.atleast_1d(z)
+        out = np.zeros((self.Ncosmo, len(z)))
+        for iz in range(len(z)):
+            out[:,iz] = self.h0 * np.sqrt(self.Omegam*(1+z[iz])**3 + 
+                                          self.OmegaR*(1+z[iz])**4 + 
+                                          self.OmegaL*np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz]))))
+                                         )
+        return np.squeeze(out)
+    
+    def get_Omegam(self, z):
+        '''
+        Get the total matter density without massive neutrinos at redshift z.
+        z : float or array-like, redshift
+        '''
+        z = np.atleast_1d(z)
+        out = np.zeros((self.Ncosmo, len(z)))
+        for iz in range(len(z)):
+            out[:,iz] = self.Omegam * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
+        return np.squeeze(out)
+    
+    def get_OmegaM(self, z):
+        '''
+        Get the total matter density at redshift z.
+        z : float or array-like, redshift
+        '''
+        z = np.atleast_1d(z)
+        out = np.zeros((self.Ncosmo, len(z)))
+        for iz in range(len(z)):
+            out[:,iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_hubble(z[iz])**2 * self.h0**2
+        return np.squeeze(out)
+    
+    def get_OmegaL(self, z):
+        '''
+        Get the dark energy density at redshift z.
+        z : float or array-like, redshift
+        '''
+        z = np.atleast_1d(z)
+        out = np.zeros((self.Ncosmo, len(z)))
+        for iz in range(len(z)):
+            out[:,iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_hubble(z[iz])**2 * self.h0**2
+        return np.squeeze(out)
+    
+    
