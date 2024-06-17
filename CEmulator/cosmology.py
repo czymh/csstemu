@@ -2,7 +2,16 @@ import numpy as np
 
 class Cosmology:
     def __init__(self, verbose=False):
+        '''
+        Initialize the CSST cosmology class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        
+        '''
+        
         self.rho_crit = 2.77536627e11 # h^2 Msun/Mpc^3
+        
     def set_cosmos(self, cosmologies):
         '''
         set the cosmologies for the cosmology class
@@ -36,7 +45,11 @@ class Cosmology:
     def get_Ez(self, z):
         '''
         Get the normalized Hubble parameter H(z) at redshift z.
-        z : float or array-like, redshift
+        
+        Args:
+            z : float or array-like, redshift
+        Returns:
+            array-like : 2D array of shape (Ncosmo, len(z)), normalized Hubble parameter H(z)
         '''
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
@@ -50,7 +63,11 @@ class Cosmology:
     def get_Omegam(self, z):
         '''
         Get the total matter density without massive neutrinos at redshift z.
-        z : float or array-like, redshift
+        
+        Args:
+            z : float or array-like, redshift
+        Returns:
+            array-like : 2D array of shape (Ncosmo, len(z)), total matter density without massive neutrinos
         '''
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
@@ -61,7 +78,11 @@ class Cosmology:
     def get_OmegaM(self, z):
         '''
         Get the total matter density at redshift z.
-        z : float or array-like, redshift
+        
+        Args:
+            z : float or array-like, redshift
+        Returns:
+            array-like : 2D array of shape (Ncosmo, len(z)), total matter density
         '''
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))
@@ -72,7 +93,11 @@ class Cosmology:
     def get_OmegaL(self, z):
         '''
         Get the dark energy density at redshift z.
-        z : float or array-like, redshift
+        
+        Args:
+            z : float or array-like, redshift
+        Returns:
+            array-like : 2D array of shape (Ncosmo, len(z)), dark energy density
         '''
         z = np.atleast_1d(z)
         out = np.zeros((self.Ncosmo, len(z)))

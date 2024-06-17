@@ -45,10 +45,4 @@ Finally, you can predict the matter power spectrum:
    csstemu.get_pknl(z=zlist, k=klist, Pcb=True, lintype='Emulator', nltype='linear')
 
 .. autofunction:: CEmulator.Emulator.CEmulator.get_pknl
-
-   The ``z`` parameter is the redshift,
-   ``k`` is the wavenumber with unit of :math:`h/\mathrm{Mpc}`,
-   ``Pcb`` is the flag to return power spectrum of cold dark matter+baryon (default is True),
-   else return the total matter power spectrum includes the massive neutrinos.  
-   ``lintype`` is the linear power spectrum type, which should be 'Emulator' or 'CLASS' 
-   ``nltype``  determine the type of emulation: the 'linear' or 'halofit'.
+   :no-index:

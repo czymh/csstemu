@@ -16,10 +16,19 @@ version = '0.1.0'
 extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc', 
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.autosummary', 
     'sphinx.ext.intersphinx',
     'sphinx_rtd_theme', # for readthedocs theme
 ]
+
+autodoc_default_options = {
+    'private-members': False,
+    'special-members': '__init__',
+    'member-order'   : 'bysource',
+    # other options...
+}
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),

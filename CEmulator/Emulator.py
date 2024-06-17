@@ -18,6 +18,13 @@ class CEmulator:
     param_limits = param_limits
     zlists       = zlists    
     def __init__(self, verbose=False):
+        '''
+        Initialize the CSST Emulator class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        
+        '''
         self.verbose = verbose
         self.Cosmo        = Cosmology(verbose=verbose)
         self.Bkmm         = Bkmm_gp(verbose=verbose) 
@@ -32,14 +39,16 @@ class CEmulator:
                    mnu=0.06):
         '''
         Set the cosmological parameters. You can input the float or array-like.
-        Omegab : float or array-like, baryon density
-        Omegam : float or array-like, Only baryon and CDM density
-        H0     : float or array-like, Hubble constant
-        As     : float or array-like, amplitude of the primordial power spectrum
-        ns     : float or array-like, spectral index
-        w      : float or array-like, dark energy equation of state
-        wa     : float or array-like, dark energy equation of state evolution
-        mnu    : float or array-like, sum of neutrino masses with unit eV
+        
+        Args:
+            Omegab : float or array-like, baryon density
+            Omegam : float or array-like, Only baryon and CDM density
+            H0     : float or array-like, Hubble constant
+            As     : float or array-like, amplitude of the primordial power spectrum
+            ns     : float or array-like, spectral index
+            w      : float or array-like, dark energy equation of state
+            wa     : float or array-like, dark energy equation of state evolution
+            mnu    : float or array-like, sum of neutrino masses with unit eV
         '''
         cosmos = {}
         cosmos['Omegab'] = np.atleast_1d(Omegab)
@@ -87,8 +96,10 @@ class CEmulator:
     def get_cosmos_class(self, z=None, non_linear=None, kmax=10):
         '''
         Get the CLASS cosmology object.
-        z : float or array-like, redshift
-        non_linear: 'halofit' or 'HMcode'
+        
+        Args:
+            z         : float or array-like, redshift
+            non_linear: string, 'halofit' or 'HMcode'
         '''
         # check_z(z)
         str_zlists = "{:.4f}".format(z[0])
@@ -104,14 +115,14 @@ class CEmulator:
         '''
         Get the linear power spectrum.
         
-        Parameters
-        ----------
-        z : float or array-like, redshift
-        k : float or array-like, wavenumber [h/Mpc]
-        type : string, 'CLASS' or 'Emulator'
-        Pcb  : bool, whether to output the total power spectrum (if False) or 
-               the cb power spectrum (if True [default])
-        kmax : float, maximum wavenumber [h/Mpc] for CLASS
+        Args:
+            z : float or array-like, redshift
+            k : float or array-like, wavenumber with unit of [h/Mpc]
+            type : string, 'CLASS' or 'Emulator'
+            Pcb  : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            kmax : float,  maximum wavenumber [h/Mpc] for CLASS
+        Return:
+            array-like : linear power spectrum with shape (numcos, len(z), len(k))
         '''
         z = check_z(self.zlists,     z)
         # k = check_k(self.Bkmm.klist, k)
@@ -140,15 +151,20 @@ class CEmulator:
     def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS'):
         '''
         Get the halofit power spectrum.
-        ******
-        Notice This version can not converge with CLASS in the high redshift (z>2.5)
-        for the c0001 and c0091 (w0 and wa near the lower limit).
-        ******
-        z : float or array-like, redshift
-        k : float or array-like, wavenumber [h/Mpc]
-        Pcb : bool, whether to output the total power spectrum (if False) or 
-              the cb power spectrum (if True [default])
-        lintype : string, 'CLASS' or 'Emulator'
+       
+        .. note:: 
+            This version can not converge with CLASS in the high redshift (z>2.5)
+            for the c0001 and c0091 (w0 and wa near the lower limit).
+        
+       
+        Args:
+            z       : float or array-like, redshift 
+            k       : float or array-like, wavenumber [h/Mpc]
+            Pcb     : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            lintype : string, 'CLASS' or 'Emulator'    
+        Return: 
+            array-like: halofit power spectrum with shape (numcos, len(z), len(k))
+         
         '''
         z = check_z(self.zlists,     z)
         if Pcb:
@@ -193,12 +209,14 @@ class CEmulator:
     def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS', nltype='linear'):
         '''
         Get the nonlinear power spectrum.
-        z : float or array-like, redshift
-        k : float or array-like, wavenumber [h/Mpc]
-        lintype : string, 'CLASS' or 'Emulator'
-        nltype  : string, 'linear' or 'halofit'
-                  'linear' means ratio of nonlinear to linear power spectrum
-                  'halofit' means ratio of nonlinear to halofit power spectrum
+        
+        Args:
+            z : float or array-like, redshift. 
+            k : float or array-like, wavenumber [h/Mpc]. 
+            lintype : string, 'CLASS' or 'Emulator'. 
+            nltype  : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
+        Return:
+            array-like : nonlinear power spectrum with shape (numcos, len(z), len(k))
         '''
         z = check_z(self.zlists,     z)
         k = check_k(self.Bkmm.klist, k)
@@ -299,8 +317,14 @@ class CEmulator:
     def get_xihmMassBin(self, z=None, r=None):
         '''
         Get the halo-matter cross correlation function.
-        z : float or array-like, redshift
-        r : float or array-like, wavenumber [Mpc/h]
+        This function only supports the **fixed** mass bin Now.
+        Mass bin is `[13.0, 13.2, 13.4, 13.6, 13.8, 14.0, 14.4, 15.0]`.
+        
+        Args:
+            z : float or array-like, redshift
+            r : float or array-like, wavenumber [Mpc/h] 
+        Return:
+            array-like : halo-matter cross correlation function with shape (numcos, len(z), len(r))
         '''
         xi_dire = self.XihmMassBin.get_xihmMassBin(z, r)
         xi_tree = self._get_xi_tree(z, r)
