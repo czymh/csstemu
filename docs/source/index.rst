@@ -1,5 +1,5 @@
 Welcome to CSST Emulator's documentation!
-===================================
+=========================================
 
 **CSST Emulator** is a cosmological emulator for China Space Station Telescope (CSST) optical survey.
 This is a pure Python package that provides a simple and intuitive API for predicting the commonly used statistics, 
@@ -8,17 +8,25 @@ Its trainning data includes **129** high-resolution N-body simulations, which ar
 the modified version of the `Gadget-4` code with **129** different cosmologies.
 So it can achieve a high accuracy in a wide range of cosmological parameters as followed.
 
-| Parameter | Lower Limit | Upper Limit |
-| --------- | ----------- | ----------- |
-| $\Omega_b$          | 0.04  | 0.06    |
-| $\Omega_m$          | 0.24  | 0.40    |
-| $H_0$               | 60    | 80      |
-| $n_s$               | 0.92  | 1.00    |
-| $A_s\times 10^{9}$  | 1.7   | 2.5     |
-| $w$                 | -1.3  | -0.7    |
-| $w_a$               | -0.5  | 0.5     |
-| $\sum M_{\nu}$      | 0     | 0.3     |
-
++----------------+-------------+-------------+
+| Parameter      | Lower Limit | Upper Limit |
++================+=============+=============+
+| $\Omega_b$     | 0.04        | 0.06        |
++----------------+-------------+-------------+
+| $\Omega_m$     | 0.24        | 0.40        |
++----------------+-------------+-------------+
+| $H_0$          | 60          | 80          |
++----------------+-------------+-------------+
+| $n_s$          | 0.92        | 1.00        |
++----------------+-------------+-------------+
+|$A_s\times 10^{9}$| 1.7       | 2.5         |
++----------------+-------------+-------------+
+| $w$            | -1.3        | -0.7        |
++----------------+-------------+-------------+
+| $w_a$          | -0.5        | 0.5         |
++----------------+-------------+-------------+
+| $\sum M_{\nu}$ | 0           | 0.3         |
++----------------+-------------+-------------+
 
 Check out the :doc:`usage` section for further information, including
 how to :ref:`installation` the project.
@@ -36,6 +44,6 @@ Contents
    api
 
 Acknowledgement
---------
+---------------
 
 Feel free to contact <chyiru@sjtu.edu.cn> if you have any questions.
