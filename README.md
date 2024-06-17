@@ -26,5 +26,10 @@ Up to now, the supportted statistics include:
 The accuracy for the matter power spectrum on the whole parameter space is shown as followed:
 ![The leave-one-out error of non-linear power spectrum.](./test/pic/LeaveOneOutError-Bk-halofit-N129.png)
 
+## Usage
+
+You can see the documentation on [readthedocs](https://csst-emulator.readthedocs.io/en/latest) for details.
+
+
 ## Acknowledgements
 Feel free to contact <chyiru@sjtu.edu.cn> if you have any questions.  
