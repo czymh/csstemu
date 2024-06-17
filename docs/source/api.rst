@@ -1,5 +1,5 @@
 API
 ===
 
-.. automodule:: CEmulator.Emulator 
+.. automodule:: Emulator 
    :members:
