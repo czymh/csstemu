@@ -1,7 +1,7 @@
 API
 ===
 
-.. autosummary::
-   :toctree: generated
-
-   CSST Emulator 
+.. automodule:: CEmulator.Emulator.CEmulator 
+   :members:
+   :undoc-members:
+   :show-inheritance:
