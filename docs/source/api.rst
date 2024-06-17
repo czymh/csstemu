@@ -1,7 +1,5 @@
 API
 ===
 
-.. automodule:: CEmulator.Emulator.CEmulator 
+.. automodule:: CEmulator.Emulator 
    :members:
-   :undoc-members:
-   :show-inheritance:

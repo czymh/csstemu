@@ -16,8 +16,7 @@ version = '0.1.0'
 extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
+    'sphinx.ext.autodoc', 
     'sphinx.ext.intersphinx',
     'sphinx_rtd_theme', # for readthedocs theme
 ]
