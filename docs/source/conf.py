@@ -1,6 +1,8 @@
-# Configuration file for the Sphinx documentation builder.
-
 # -- Project information
+import os
+import sys
+# import sphinx_rtd_theme
+sys.path.insert(0, os.path.abspath('../../'))
 
 project = 'CSST Emulator'
 copyright = '2024, Zhao Chen' #(陈钊)
@@ -17,6 +19,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
+    'sphinx_rtd_theme', # for readthedocs theme
 ]
 
 intersphinx_mapping = {
@@ -29,7 +32,7 @@ templates_path = ['_templates']
 
 # -- Options for HTML output
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'classic'
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'

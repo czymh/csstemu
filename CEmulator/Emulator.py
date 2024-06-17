@@ -196,7 +196,7 @@ class CEmulator:
         z : float or array-like, redshift
         k : float or array-like, wavenumber [h/Mpc]
         lintype : string, 'CLASS' or 'Emulator'
-        nltype  : string, 'linear' or 'halofit' 
+        nltype  : string, 'linear' or 'halofit'
                   'linear' means ratio of nonlinear to linear power spectrum
                   'halofit' means ratio of nonlinear to halofit power spectrum
         '''
