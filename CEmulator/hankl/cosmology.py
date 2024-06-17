@@ -38,7 +38,7 @@ def P2xi(k, P, l, n=0, lowring=False, ext=0, range=None, return_ext=False):
     Returns
     -------
     r, xi : array, array
-        Array of uniformly logarithmically spaced r values and respective array of xi_{l}^{(n)}(r) values.
+        Array of uniformly logarithmically spaced r values and respective array of :math:`xi_{l}^{(n)}(r)` values.
     """
     r, f = FFTLog(
         k,
@@ -90,7 +90,7 @@ def xi2P(r, xi, l, n=0, lowring=False, ext=0, range=None, return_ext=False):
     Returns
     -------
     k, P : array, array
-        Array of uniformly logarithmically spaced k values and array of respective P_{l}^{(n)}(k) values.
+        Array of uniformly logarithmically spaced k values and array of respective :math:`P_{l}^{(n)}(k)` values.
     """
     k, F = FFTLog(
         r,

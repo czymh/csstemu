@@ -1,0 +1,6 @@
+#### requirements for the CSST Emulator package
+numpy
+scipy
+
+
+
