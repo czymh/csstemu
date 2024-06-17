@@ -1,7 +1,7 @@
 # -- Project information
 import os
 import sys
-# import sphinx_rtd_theme
+import sphinx_rtd_theme
 sys.path.insert(0, os.path.abspath('../../'))
 
 project = 'CSST Emulator'
@@ -32,7 +32,7 @@ templates_path = ['_templates']
 
 # -- Options for HTML output
 
-html_theme = 'classic'
+html_theme = 'sphinx_rtd_theme'
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
