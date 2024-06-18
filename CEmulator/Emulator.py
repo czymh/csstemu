@@ -38,47 +38,41 @@ class CEmulator:
                    H0=67.66, As=2.105e-9, ns=0.9665, w=-1.0, wa=0.0, 
                    mnu=0.06):
         '''
-        Set the cosmological parameters. You can input the float or array-like.
+        Set the cosmological parameters.
         
         Args:
-            Omegab : float or array-like, baryon density
-            Omegam : float or array-like, Only baryon and CDM density
-            H0     : float or array-like, Hubble constant
-            As     : float or array-like, amplitude of the primordial power spectrum
-            ns     : float or array-like, spectral index
-            w      : float or array-like, dark energy equation of state
-            wa     : float or array-like, dark energy equation of state evolution
-            mnu    : float or array-like, sum of neutrino masses with unit eV
+            Omegab : float, baryon density
+            Omegam : float, Only baryon and CDM density
+            H0     : float, Hubble constant
+            As     : float, amplitude of the primordial power spectrum
+            ns     : float, spectral index
+            w      : float, dark energy equation of state
+            wa     : float, dark energy equation of state evolution
+            mnu    : float, sum of neutrino masses with unit eV
         '''
         cosmos = {}
-        cosmos['Omegab'] = np.atleast_1d(Omegab)
-        cosmos['Omegam'] = np.atleast_1d(Omegam)
-        cosmos['H0']     = np.atleast_1d(H0)
-        cosmos['ns']     = np.atleast_1d(ns)
-        cosmos['A']      = np.atleast_1d(As*1e9)
-        cosmos['w']      = np.atleast_1d(w)
-        cosmos['wa']     = np.atleast_1d(wa)
-        cosmos['mnu']    = np.atleast_1d(mnu)
+        cosmos['Omegab'] = (Omegab)
+        cosmos['Omegam'] = (Omegam)
+        cosmos['H0']     = (H0)
+        cosmos['ns']     = (ns)
+        cosmos['A']      = (As*1e9)
+        cosmos['w']      = (w)
+        cosmos['wa']     = (wa)
+        cosmos['mnu']    = (mnu)
         # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
         n_params = len(self.param_names)
         ## check the parameter range
-        lenlists = np.zeros((n_params), dtype=int)
         for ind, ikey in enumerate(self.param_names):
             if np.any(cosmos[ikey] < self.param_limits[ikey][0]) or \
                np.any(cosmos[ikey] > self.param_limits[ikey][1]):
                 raise ValueError('Parameter %s out of range.'%ikey)
-            lenlists[ind] = len(cosmos[ikey])
-        numcosmos = np.unique(lenlists)
-        if numcosmos.size > 1:
-            raise ValueError('Inconsistent parameter array length.')
-        numcosmos = numcosmos[0]
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
-        ## into the cosmologies array
-        self.cosmologies = np.zeros((numcosmos, n_params))
+        ## into the cosmologies array only One cosmology each tim
+        self.cosmologies = np.zeros((1, n_params))
         for ind, ikey in enumerate(self.param_names):
-            self.cosmologies[:,ind] = cosmos[ikey]
-        ### normalize the cosmologies
+            self.cosmologies[0,ind] = cosmos[ikey]
+        ### normalize the cosmologies with the shape (1, n_params)
         self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
         
         ### pass the cosmologies (normalized) to other class
@@ -88,10 +82,9 @@ class CEmulator:
         self.XihmMassBin.ncosmo  = self.ncosmo
         self.PkhmMassBin.ncosmo  = self.ncosmo
         
-        self.numcos = self.cosmologies.shape[0]
         #### from init move to here 
         #### refresh the cosmology class for each cosmology set 
-        self.cosmo_class_arr = None
+        # cosmo_class = None ## Not store this in the class
                     
     def get_cosmos_class(self, z=None, non_linear=None, kmax=10):
         '''
@@ -106,39 +99,38 @@ class CEmulator:
         if len(z) > 1:
             for i_z in range(len(z) - 1):
                 str_zlists += ", {:.4f}".format(z[i_z+1])
-        self.cosmo_class_arr = np.zeros((self.numcos,), dtype=object)
-        for ic in range(self.numcos):
-            self.cosmo_class_arr[ic] = useCLASS(self.cosmologies[ic], str_zlists, non_linear=non_linear, kmax=kmax)
-        return True
+        cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax)
+        return cosmo_class
     
-    def get_pklin(self, z=None, k=None, type='CLASS', Pcb=True, kmax=10):
+    def get_pklin(self, z=None, k=None, Pcb=True, type='CLASS', cosmo_class=None):
         '''
         Get the linear power spectrum.
         
         Args:
             z : float or array-like, redshift
             k : float or array-like, wavenumber with unit of [h/Mpc]
-            type : string, 'CLASS' or 'Emulator'
             Pcb  : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
-            kmax : float,  maximum wavenumber [h/Mpc] for CLASS
+            type : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', 
+            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
         Return:
-            array-like : linear power spectrum with shape (numcos, len(z), len(k))
+            array-like : linear power spectrum with shape (len(z), len(k))
         '''
         z = check_z(self.zlists,     z)
         # k = check_k(self.Bkmm.klist, k)
         if   type == 'CLASS':
-            if self.cosmo_class_arr is None:
-                self.get_cosmos_class(z, kmax=kmax)
-            pklin = np.zeros((self.numcos, len(z), len(k)))
-            for ic in range(self.numcos):
-                if Pcb and self.cosmo_class_arr[ic].Omega_nu != 0:
-                    pkfunc = self.cosmo_class_arr[ic].pk_cb_lin
-                else:
-                    pkfunc = self.cosmo_class_arr[ic].pk_lin
-                h0 = self.cosmo_class_arr[ic].h()
-                for iz in range(len(z)):
-                    pklin[ic, iz] = np.array([pkfunc(ik*h0, z[iz])*h0*h0*h0 
-                                                for ik in list(k)])
+            if cosmo_class is None:
+                kmax = np.max(k)
+                cosmo_class = self.get_cosmos_class(z, kmax=kmax)
+            pklin = np.zeros((len(z), len(k)))
+            if Pcb and cosmo_class.Omega_nu != 0:
+                pkfunc = cosmo_class.pk_cb_lin
+            else:
+                pkfunc = cosmo_class.pk_lin
+            h0 = cosmo_class.h()
+            for iz in range(len(z)):
+                pklin[iz] = np.array([pkfunc(ik*h0, z[iz])*h0*h0*h0 
+                                      for ik in list(k)])
         elif type == 'Emulator':
             if Pcb:
                 pklin = self.Pkmmlin.get_pkLin(z, k)
@@ -148,7 +140,7 @@ class CEmulator:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
         
-    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS'):
+    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS', cosmo_class=None):
         '''
         Get the halofit power spectrum.
        
@@ -158,32 +150,34 @@ class CEmulator:
         
        
         Args:
-            z       : float or array-like, redshift 
-            k       : float or array-like, wavenumber [h/Mpc]
-            Pcb     : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
-            lintype : string, 'CLASS' or 'Emulator'    
+            z           : float or array-like, redshift 
+            k           : float or array-like, wavenumber [h/Mpc]
+            Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            lintype     : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', 
+            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.    
         Return: 
-            array-like: halofit power spectrum with shape (numcos, len(z), len(k))
+            array-like: halofit power spectrum with shape (len(z), len(k))
          
         '''
         z = check_z(self.zlists,     z)
-        if Pcb:
-            fnuall = np.zeros((self.numcos))
-        else:
-            fnuall = self.Cosmo.Omeganu/(self.Cosmo.Omegam + self.Cosmo.Omeganu)
-        OmegaLzall = self.Cosmo.get_OmegaL(z)
-        OmegaMzall = self.Cosmo.get_OmegaM(z)
-        pkhalofit  = np.zeros((self.numcos, len(z), len(k)))
-        kinterp    = np.logspace(-5, 1, 1024)
-        pklinintp  = self.get_pklin(z, kinterp, type=lintype, Pcb=Pcb, kmax=kinterp.max())
-        for ic in range(self.numcos):
-            fnu = fnuall[ic]
+        if  lintype == 'Emulator':
+            if Pcb:
+                fnu = 0.0
+            else:
+                fnu = self.Cosmo.Omeganu/(self.Cosmo.Omegam + self.Cosmo.Omeganu)
+                raise ValueError('For total power spectrum, use type=CLASS NOW.')
+            OmegaLzall   = self.Cosmo.get_OmegaL(z)
+            OmegaMzall   = self.Cosmo.get_OmegaM(z)
+            pkhalofit    = np.zeros((len(z), len(k)))
+            kinterp      = np.logspace(-5, 1, 1024)
+            pklinintp    = self.get_pklin(z, kinterp, Pcb=Pcb, type=lintype)
             for iz in range(len(z)):
-                OmegaLz = OmegaLzall[ic,iz]
-                OmegaMz = OmegaMzall[ic,iz]
-                w_eff   = self.Cosmo.w0[ic] + self.Cosmo.wa[ic]*(z[iz]/(1+z[iz]))
+                OmegaLz = OmegaLzall[iz]
+                OmegaMz = OmegaMzall[iz]
+                w_eff   = self.Cosmo.w0 + self.Cosmo.wa*(z[iz]/(1+z[iz]))
                 Pklin = lambda k: 10**interp1d(np.log10(kinterp), 
-                                               np.log10(pklinintp[ic,iz]),
+                                               np.log10(pklinintp[iz]),
                                                kind='slinear', 
                                                fill_value="extrapolate")(np.log10(k))
                 R_sigma, neff, Curv = compute_Rsigma_neff_C(Pklin)
@@ -202,71 +196,71 @@ class CEmulator:
                     + fnu*(1.081 + 0.395*neff*neff)
                 mun    = 0.
                 nun    = 10.**(5.2105 + 3.6902*neff)
-                pkhalofit[ic,iz] = PkHaloFit(k, Pklin(k), R_sigma, OmegaMz, OmegaLz, fnu, \
-                                             an, bn, cn, gamman, alphan, betan, mun, nun)
+                pkhalofit[iz] = PkHaloFit(k, Pklin(k), R_sigma, OmegaMz, OmegaLz, fnu, \
+                                          an, bn, cn, gamman, alphan, betan, mun, nun)
+        else:
+            if cosmo_class is None:
+                cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
+            pkhalofit = np.zeros((len(z), len(k)))
+            h0 = cosmo_class.h()
+            for iz in range(len(z)):
+                pkhalofit[iz] = np.array([cosmo_class.pk_cb_hf(ik*h0, z[iz])*h0*h0*h0 
+                                          for ik in list(k)])
         return pkhalofit
         
-    def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS', nltype='linear'):
+    def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS', nltype='linear', cosmo_class=None):
         '''
         Get the nonlinear power spectrum.
         
         Args:
-            z : float or array-like, redshift. 
-            k : float or array-like, wavenumber [h/Mpc]. 
-            lintype : string, 'CLASS' or 'Emulator'. 
-            nltype  : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
+            z           : float or array-like, redshift. 
+            k           : float or array-like, wavenumber [h/Mpc]. 
+            lintype     : string, 'CLASS' or 'Emulator'. 
+            nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
+            cosmo_class : CLASS object, if type is 'CLASS', 
+            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
         Return:
-            array-like : nonlinear power spectrum with shape (numcos, len(z), len(k))
+            array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
         z = check_z(self.zlists,     z)
         k = check_k(self.Bkmm.klist, k)
-        if   nltype == 'linear':
-            ## get the nonlinear transfer for Pcb
-            Bkpred = self.Bkmm.get_Bk(z, k)
-            ## get the linear power spectrum for cb
-            pkcblin = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
-        elif nltype == 'halofit':
-            ## get the nonlinear transfer for Pcb
-            Bkpred = self.Bkmm_halofit.get_Bk(z, k)
-            ## get the halofit power spectrum for cb
-            if   lintype == 'Emulator':
-                pkcblin = self.get_pkhalofit(z, k, Pcb=Pcb, lintype=lintype)
-            elif lintype == 'CLASS':
-                if self.cosmo_class_arr is None:
-                    self.get_cosmos_class(z, non_linear='halofit')
-                pkcblin = np.zeros((self.numcos, len(z), len(k)))
-                for ic in range(self.numcos):
-                    h0 = self.cosmo_class_arr[ic].h()
-                    for iz in range(len(z)):
-                        pkcblin[ic,iz] = np.array([self.cosmo_class_arr[ic].pk_cb(ik*h0, z[iz])*h0*h0*h0 
-                                                   for ik in list(k)])
         if Pcb:
+            if   nltype == 'linear':
+                ## get the nonlinear transfer for Pcb
+                Bkpred = self.Bkmm.get_Bk(z, k)
+                ## get the linear power spectrum for cb
+                kmax = np.max(k)
+                pkcblin = self.get_pklin(z, k, Pcb=Pcb, type=lintype, kmax=kmax, cosmo_class=cosmo_class)
+            elif nltype == 'halofit':
+                ## get the nonlinear transfer for Pcb
+                Bkpred = self.Bkmm_halofit.get_Bk(z, k)
+                ## get the halofit power spectrum for cb
+                pkcblin = self.get_pkhalofit(z, k, Pcb=Pcb, lintype=lintype, cosmo_class=cosmo_class)
             pknl = pkcblin * Bkpred
         else:
             if lintype == 'CLASS':
-                if self.cosmo_class_arr is None:
-                    self.get_cosmos_class(z)
+                if cosmo_class is None:
+                    cosmo_class = self.get_cosmos_class(z)
                 pknl   = np.zeros_like(pkcblin)
-                h0     = self.cosmo_class_arr[0].h()
+                h0     = cosmo_class.h()
                 # pklin  = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
                 pkcbnl = pkcblin * Bkpred
-                for ic in range(self.numcos):
-                    if self.cosmo_class_arr[ic].Omega_nu != 0:
-                        for iz in range(len(z)):
-                            tkall = self.cosmo_class_arr[ic].get_transfer(z=z[iz])
-                            # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='linear')
-                            Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='linear')
-                            fb2cb = self.cosmo_class_arr[ic].Omega_b()/(self.cosmo_class_arr[ic].Omega0_cdm()+self.cosmo_class_arr[ic].Omega_b())
-                            fc2cb = self.cosmo_class_arr[ic].Omega0_cdm()/(self.cosmo_class_arr[ic].Omega0_cdm()+self.cosmo_class_arr[ic].Omega_b())
-                            Tkcb  = fc2cb*tkall['d_cdm']+fb2cb*tkall['d_b']
-                            Tkcb_interp = interp1d(tkall['k (h/Mpc)'], Tkcb, kind='linear')
-                            fnu   = self.cosmo_class_arr[ic].Omega_nu/self.cosmo_class_arr[ic].Omega_m()
-                            # Tkcb_nu_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*Tkcb, kind='linear')
-                            ## use the linear neutrino power spectrum to calculate the nonlinear total power spectrum
-                            pknunulin = pkcblin[ic,iz]/Tkcb_interp(k)/Tkcb_interp(k) * Tknusquare_interp(k)
-                            pknl[ic,iz] = (1-fnu)**2*pkcbnl[ic,iz] + fnu*fnu*pknunulin + 2*fnu*(1-fnu)*np.sqrt(pkcbnl[ic,iz]*pknunulin)
-                    else:
-                        pknl[ic] = pkcblin[ic] * Bkpred[ic] 
+                if cosmo_class.Omega_nu != 0:
+                    for iz in range(len(z)):
+                        tkall = cosmo_class.get_transfer(z=z[iz])
+                        # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='linear')
+                        Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='linear')
+                        fb2cb = cosmo_class.Omega_b()/(cosmo_class.Omega0_cdm()+cosmo_class.Omega_b())
+                        fc2cb = cosmo_class.Omega0_cdm()/(cosmo_class.Omega0_cdm()+cosmo_class.Omega_b())
+                        Tkcb  = fc2cb*tkall['d_cdm']+fb2cb*tkall['d_b']
+                        Tkcb_interp = interp1d(tkall['k (h/Mpc)'], Tkcb, kind='linear')
+                        fnu   = cosmo_class.Omega_nu/cosmo_class.Omega_m()
+                        # Tkcb_nu_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*Tkcb, kind='linear')
+                        ## use the linear neutrino power spectrum to calculate the nonlinear total power spectrum
+                        pknunulin = pkcblin[iz]/Tkcb_interp(k)/Tkcb_interp(k) * Tknusquare_interp(k)
+                        pknl[iz] = (1-fnu)**2*pkcbnl[iz] + fnu*fnu*pknunulin + 2*fnu*(1-fnu)*np.sqrt(pkcbnl[iz]*pknunulin)
+                else:
+                    pknl = pkcblin * Bkpred
             else:
                 raise ValueError('For total power spectrum, only support type=CLASS NOW.')                           
         return pknl
@@ -281,18 +275,17 @@ class CEmulator:
         ind = kinterp<=kcut
         kinterp = kinterp[ind]
         pinterp = self.PkhmMassBin.get_pkhmMassBin(z, kinterp)
-        linterp = self.get_pklin(z, kinterp, type='Emulator', Pcb=True)
-        bkout = np.zeros((pinterp.shape[0], pinterp.shape[1], pinterp.shape[2], len(k)))
-        for i1 in range(pinterp.shape[0]):         # cosmology
-            for i2 in range(pinterp.shape[1]):     # massbin 
-                for i3 in range(pinterp.shape[2]): # redshift
-                    ### introduce a smooth process
-                    datainterp = pinterp[i1,i2,i3]/linterp[i1,i3]
-                    datainterp = savgol_filter(datainterp, window_length=9, polyorder=3)
-                    funcinterp = interp1d(np.log10(kinterp),
-                                          datainterp,
-                                          kind='slinear', fill_value="extrapolate")
-                    bkout[i1,i2,i3] = funcinterp(np.log10(k))     
+        linterp = self.get_pklin(z, kinterp, Pcb=True, type='Emulator')
+        bkout = np.zeros((pinterp.shape[0], pinterp.shape[1], len(k)))
+        for i1 in range(pinterp.shape[0]):     # massbin 
+            for i2 in range(pinterp.shape[1]): # redshift
+                ### introduce a smooth process
+                datainterp = pinterp[i1,i2]/linterp[i2]
+                datainterp = savgol_filter(datainterp, window_length=9, polyorder=3)
+                funcinterp = interp1d(np.log10(kinterp),
+                                        datainterp,
+                                        kind='slinear', fill_value="extrapolate")
+                bkout[i1,i2] = funcinterp(np.log10(k))     
         return bkout
 
     def _get_xi_tree(self, z=None, r=None):
@@ -305,13 +298,12 @@ class CEmulator:
         ks = np.logspace(-5, 2, 1024)
         pkcblin = self.get_pklin(z, ks, type='Emulator', Pcb=True)
         bkhm    = self._get_bkhmMassBin(z, ks)
-        ### cosmology and number density
-        xi_trees = np.zeros((bkhm.shape[0], bkhm.shape[1], len(z), len(r)))
-        for ic in range(bkhm.shape[0]):       # cosmology
-            for im in range(bkhm.shape[1]):   # massbin
-                for iz in range(bkhm.shape[2]):
-                    r0, xi0 = P2xi(ks, bkhm[ic,im,iz]*pkcblin[ic,iz], 0)
-                    xi_trees[ic,im,iz] = ius(r0,xi0.real)(r)
+        ### number density
+        xi_trees = np.zeros((bkhm.shape[0], len(z), len(r)))
+        for im in range(bkhm.shape[0]):   # massbin
+            for iz in range(bkhm.shape[1]):
+                r0, xi0 = P2xi(ks, bkhm[im,iz]*pkcblin[iz], 0)
+                xi_trees[im,iz] = ius(r0,xi0.real)(r)
         return xi_trees
        
     def get_xihmMassBin(self, z=None, r=None):
@@ -324,14 +316,13 @@ class CEmulator:
             z : float or array-like, redshift
             r : float or array-like, wavenumber [Mpc/h] 
         Return:
-            array-like : halo-matter cross correlation function with shape (numcos, len(z), len(r))
+            array-like : halo-matter cross correlation function with shape (len(z), len(r))
         '''
         xi_dire = self.XihmMassBin.get_xihmMassBin(z, r)
         xi_tree = self._get_xi_tree(z, r)
         rswitch = 40.0 # Mpc/h
         xi_comb = np.zeros_like(xi_dire)
-        for ic in range(xi_dire.shape[0]):
-            for im in range(xi_dire.shape[1]):
-                xi_comb[ic, im] = xi_dire[ic, im] * np.exp(-(r/rswitch)**4) \
-                                + xi_tree[ic, im] * (1 - np.exp(-(r/rswitch)**4))
+        for im in range(xi_dire.shape[0]): # massbin
+            xi_comb[im] = xi_dire[im] * np.exp(-(r/rswitch)**4) \
+                        + xi_tree[im] * (1 - np.exp(-(r/rswitch)**4))
         return xi_comb

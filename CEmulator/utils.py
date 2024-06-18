@@ -24,8 +24,10 @@ def check_z(zlists=zlists,z=None):
         z = zlists
         print('No redshift input, using default redshifts [0,3]-12.')
     zinput = np.atleast_1d(np.copy(z))
-    if np.any(zinput < zlists[-1]) or np.any(zinput > zlists[0]):
-        raise ValueError('Redshift z out of range [0, 3].')
+    if np.any(zinput < zlists[-1]):
+        raise ValueError('Redshift z is smaller than the lower limit %.2f.'%zlists[-1])
+    if np.any(zinput > zlists[0]):
+        raise ValueError('Redshift z is larger than the upper limit %.2f.'%zlists[0])
     if not np.all(np.diff(zinput) > 0.0):
         zinput.sort()
         print('Predicting redshifts (sorted):', zinput)
@@ -44,14 +46,17 @@ def check_k(klists, k=None):
 def NormCosmo(cosmologies, param_names, param_limits):
     '''
     Normalizes the cosmological parameters to the range [0, 1]
-    cosmologies : array of shape (n_cosmologies, n_params)
+    cosmologies : array of shape (ncosmologies, n_params)
     param_names : list of parameter names
     param_limits: dictionary with parameter names as keys and [min, max] as values
     '''
+    if cosmologies.ndim != 2:
+        raise ValueError('Input cosmologies must be 2D array.')
     ncosmo = np.zeros_like(cosmologies)
     for i, param in enumerate(param_names):
         ncosmo[:,i] = (cosmologies[:,i] - param_limits[param][0]) / (param_limits[param][1] - param_limits[param][0])
     return ncosmo
+
 
 class MyStandardScaler:
     def __init__(self):
