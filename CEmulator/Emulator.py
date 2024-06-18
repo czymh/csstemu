@@ -111,8 +111,7 @@ class CEmulator:
             k : float or array-like, wavenumber with unit of [h/Mpc]
             Pcb  : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
             type : string, 'CLASS' or 'Emulator'
-            cosmo_class : CLASS object, if type is 'CLASS', 
-            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
         Return:
             array-like : linear power spectrum with shape (len(z), len(k))
         '''
@@ -154,8 +153,7 @@ class CEmulator:
             k           : float or array-like, wavenumber [h/Mpc]
             Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
             lintype     : string, 'CLASS' or 'Emulator'
-            cosmo_class : CLASS object, if type is 'CLASS', 
-            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.    
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.    
         Return: 
             array-like: halofit power spectrum with shape (len(z), len(k))
          
@@ -217,8 +215,7 @@ class CEmulator:
             k           : float or array-like, wavenumber [h/Mpc]. 
             lintype     : string, 'CLASS' or 'Emulator'. 
             nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
-            cosmo_class : CLASS object, if type is 'CLASS', 
-            then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
         Return:
             array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
