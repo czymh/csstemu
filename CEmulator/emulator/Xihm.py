@@ -50,27 +50,22 @@ class XihmMassBin_gp:
         '''
         z = check_z(self.zlists, z)
         r = np.atleast_1d(r)
-        
-        numcos = self.ncosmo.shape[0]
-        if self.verbose:
-            print('Predicting XihmNL of %d cosmologies...'%numcos)
         ## Gaussian Process Regression
-        Bkpred = np.zeros((numcos, self.nmassbin, self.nvec))
-        Bkout0 = np.zeros((numcos, self.nmassbin, len(self.zlists), len(self.rmid)))
+        Bkpred = np.zeros((self.nmassbin, self.nvec))
+        Bkout0 = np.zeros((self.nmassbin, len(self.zlists), len(self.rmid)))
         for im in range(self.nmassbin):
             for ivec in range(self.nvec):
-                Bkpred[:,im,ivec] = self.__GPR[im,ivec].predict(self.ncosmo)
+                Bkpred[im,ivec] = self.__GPR[im,ivec].predict(self.ncosmo)[0]
             ## PCA inverse transform
-            Bkout0[:,im,:,:] = ((Bkpred[:,im,:] @ self.__PCA_Data[im][1:]) 
-                             + self.__PCA_Data[im][0]).reshape(numcos, len(self.zlists), len(self.rmid))
-        Bkout0 = Bkout0[:,:,::-1,:]  ## reverse the redshift axis
-        Bkout = np.zeros((numcos, self.nmassbin, len(z), len(r)))
+            Bkout0[im,:,:] = ((Bkpred[im,:] @ self.__PCA_Data[im][1:]) 
+                           + self.__PCA_Data[im][0]).reshape(len(self.zlists), len(self.rmid))
+        Bkout0 = Bkout0[:,::-1,:]  ## reverse the redshift axis
+        Bkout = np.zeros((self.nmassbin, len(z), len(r)))
         ### z space use cubic spline while k space use linear interpolation
-        for ic in range(numcos):
-            for im in range(self.nmassbin):
-                spline = RectBivariateSpline(self.zlists[::-1], np.log10(self.rmid), (Bkout0[ic,im]), 
-                                             kx=3, ky=3)
-                Bkout[ic,im] = (spline(z, np.log10(r)))
+        for im in range(self.nmassbin):
+            spline = RectBivariateSpline(self.zlists[::-1], np.log10(self.rmid), (Bkout0[im]), 
+                                         kx=3, ky=3)
+            Bkout[im] = (spline(z, np.log10(r)))
         return Bkout
     
     

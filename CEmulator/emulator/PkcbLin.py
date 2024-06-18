@@ -49,29 +49,25 @@ class PkcbLin_gp:
         '''
         z = check_z(self.zlists, z)
         k = check_k(self.klist, k)
-        numcos = self.ncosmo.shape[0]
-        if self.verbose:
-            print('Predicting PkcbLin of %d cosmologies...'%numcos)
         if self.NormBeforeGP:
             Normcosmo = self.paramSS.transform(self.ncosmo)
         else:
             Normcosmo = np.copy(self.ncosmo)
         ## Gaussian Process Regression
-        pkpred = np.zeros((numcos, self.nvec))
+        pkpred = np.zeros((self.nvec))
         for ivec in range(self.nvec):
-            pkpred[:,ivec] = self.__GPR[ivec].predict(Normcosmo)
+            pkpred[ivec] = self.__GPR[ivec].predict(Normcosmo)
         if self.NormBeforeGP:
-            pkpred = self.pkcoeffSS.inverse_transform(pkpred)
+            pkpred = self.pkcoeffSS.inverse_transform(pkpred.reshape(1,-1))[0]
         ## PCA inverse transform
         pkpred = 10**((pkpred @ self.__PCA_components) + self.__PCA_mean)
-        pkpred = pkpred.reshape(numcos, len(self.zlists), len(self.klist))
-        pkpred = pkpred[:,::-1,:]
+        pkpred = pkpred.reshape(len(self.zlists), len(self.klist))
+        pkpred = pkpred[::-1,:]
         pkout  = np.zeros((pkpred.shape[0], len(z), len(k)))
         ### z space use cubic spline while k space use linear interpolation
-        for ic in range(numcos):
-            spline    = RectBivariateSpline(self.zlists[::-1], self.klist, pkpred[ic], 
+        spline = RectBivariateSpline(self.zlists[::-1], self.klist, pkpred, 
                                             kx=3, ky=1)
-            pkout[ic] = spline(z, k)
+        pkout  = spline(z, k)
         return pkout
     
     

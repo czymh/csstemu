@@ -18,12 +18,14 @@ class Cosmology:
         '''
         Neff = 3.046
         self.mnu     = cosmologies['mnu'] # eV
-        # number of ultra-relativistic neutrinos
-        self.Nur     = 2.0328*np.ones_like(self.mnu)
-        self.Nur[self.mnu == 0] = Neff
-        self.Nncdm   = np.ones_like(self.mnu)
-        self.Nncdm[self.mnu == 0] = 0
-        ### only support one massive neutrino
+        # number of ultra-relativistic neutrinos 
+        # Now only support 3.046 or 2.0328 (0 or 1 massive neutrino)
+        if   self.mnu == 0.0:
+            self.Nur     = 3.046
+            self.Nncdm   = 0
+        else:
+            self.Nur     = 2.0328
+            self.Nncdm   = 1
         self.h0      = cosmologies['H0'] / 100
         self.Omeganu = self.mnu/93.14/self.h0/self.h0
         # total matter without massive neutrinos
@@ -40,7 +42,6 @@ class Cosmology:
         f_nnu = 7/8*(Gamma_nu**4)*self.Nur # neutrino radiation
         self.OmegaR  = self.Omegag*(1+f_nnu) # Total radiation
         self.OmegaL  = 1 - self.Omegam - self.Omeganu - self.OmegaR
-        self.Ncosmo  = len(self.Omegam)
         
     def get_Ez(self, z):
         '''
@@ -49,12 +50,12 @@ class Cosmology:
         Args:
             z : float or array-like, redshift
         Returns:
-            array-like : 2D array of shape (Ncosmo, len(z)), normalized Hubble parameter H(z)
+            array-like : 2D array of shape (len(z)), normalized Hubble parameter H(z)
         '''
         z = np.atleast_1d(z)
-        out = np.zeros((self.Ncosmo, len(z)))
+        out = np.zeros((len(z)))
         for iz in range(len(z)):
-            out[:,iz] = np.sqrt((self.Omegam+self.Omeganu)*(1+z[iz])**3 + 
+            out[iz] = np.sqrt((self.Omegam+self.Omeganu)*(1+z[iz])**3 + 
                                 self.OmegaR*(1+z[iz])**4 + 
                                 self.OmegaL*np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz]))))
                                 )
@@ -67,12 +68,12 @@ class Cosmology:
         Args:
             z : float or array-like, redshift
         Returns:
-            array-like : 2D array of shape (Ncosmo, len(z)), total matter density without massive neutrinos
+            array-like : 2D array of shape (len(z)), total matter density without massive neutrinos
         '''
         z = np.atleast_1d(z)
-        out = np.zeros((self.Ncosmo, len(z)))
+        out = np.zeros((len(z)))
         for iz in range(len(z)):
-            out[:,iz] = self.Omegam * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
+            out[iz] = self.Omegam * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     def get_OmegaM(self, z):
@@ -82,12 +83,12 @@ class Cosmology:
         Args:
             z : float or array-like, redshift
         Returns:
-            array-like : 2D array of shape (Ncosmo, len(z)), total matter density
+            array-like : 2D array of shape (len(z)), total matter density
         '''
         z = np.atleast_1d(z)
-        out = np.zeros((self.Ncosmo, len(z)))
+        out = np.zeros((len(z)))
         for iz in range(len(z)):
-            out[:,iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
+            out[iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     def get_OmegaL(self, z):
@@ -97,12 +98,12 @@ class Cosmology:
         Args:
             z : float or array-like, redshift
         Returns:
-            array-like : 2D array of shape (Ncosmo, len(z)), dark energy density
+            array-like : 2D array of shape (len(z)), dark energy density
         '''
         z = np.atleast_1d(z)
-        out = np.zeros((self.Ncosmo, len(z)))
+        out = np.zeros((len(z)))
         for iz in range(len(z)):
-            out[:,iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_Ez(z[iz]).reshape(-1)**2
+            out[iz] = self.OmegaL * np.exp(3*((1/(1+z[iz])-1)*self.wa-(1 + self.w0 + self.wa)*np.log(1/(1+z[iz])))) / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     
