@@ -1,4 +1,6 @@
 import numpy as np
+import warnings
+from scipy.integrate import trapz
 from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
@@ -36,7 +38,7 @@ class CEmulator:
         
     def set_cosmos(self, Omegab=0.04897468, Omegam=0.30969282, 
                    H0=67.66, As=2.105e-9, ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06):
+                   mnu=0.06, sigma8=None):
         '''
         Set the cosmological parameters.
         
@@ -49,18 +51,46 @@ class CEmulator:
             w      : float, dark energy equation of state
             wa     : float, dark energy equation of state evolution
             mnu    : float, sum of neutrino masses with unit eV
+            sigma8 : float, amplitude of the total matter power spectrum. If both As and sigma8 are provided, the As will be used. You can set As=None to activate sigma8.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
         cosmos['Omegam'] = (Omegam)
         cosmos['H0']     = (H0)
         cosmos['ns']     = (ns)
-        cosmos['A']      = (As*1e9)
         cosmos['w']      = (w)
         cosmos['wa']     = (wa)
         cosmos['mnu']    = (mnu)
-        # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
         n_params = len(self.param_names)
+        if As is not None:
+            cosmos['A']      = (As*1e9)
+            if sigma8 is not None:
+                warnings.warn('Both As and sigma8 are provided, the As will be used and ignore the sigma8 value.', UserWarning)
+        elif sigma8 is not None:
+            ### convert sigma8 to As
+            sigma8_g = 0.0
+            As       = 2.105
+            abserr   = 1e-4
+            while np.abs(sigma8_g - sigma8) > abserr:
+                cosmos['A'] = As
+                cosmologies_g = np.zeros((1, n_params))
+                for ind, ikey in enumerate(self.param_names):
+                    cosmologies_g[0,ind] = cosmos[ikey]
+                # ncosmo_g = NormCosmo(cosmologies_g, self.param_names, self.param_limits)
+                # self.Pkmmlin.ncosmo = ncosmo_g
+                # sigma8_g = self.get_sigma8(type='Emulator')
+                
+                ## only use the CLASS to calculate the sigma8
+                ## this is slow so we will replace it with the Emulator in the future.
+                self.cosmologies = cosmologies_g
+                sigma8_g = self.get_sigma8(type='CLASS') 
+                # print('Guess sigma8:', sigma8_g)
+                As = As * sigma8*sigma8/sigma8_g/sigma8_g
+            if self.verbose:
+                print('The As is set to %.6e (sigma8=%.6f) to match the input sigma8=%.6f.'%(cosmos['A']*1e-9, sigma8_g, sigma8)) 
+        else:
+            raise ValueError('Both As and sigma8 are None, please provide one of them at least.')
+        # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
         ## check the parameter range
         for ind, ikey in enumerate(self.param_names):
             if np.any(cosmos[ikey] < self.param_limits[ikey][0]) or \
@@ -95,6 +125,7 @@ class CEmulator:
             non_linear: string, 'halofit' or 'HMcode'
         '''
         # check_z(z)
+        z = np.atleast_1d(z)
         str_zlists = "{:.4f}".format(z[0])
         if len(z) > 1:
             for i_z in range(len(z) - 1):
@@ -138,6 +169,87 @@ class CEmulator:
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
+    
+    def get_sigma_z(self, z=None, R=None, type='CLASS', cosmo_class=None):
+        '''
+        Get the sigma(z, R) of tot matter changing with the redshift.
+        
+        Args:
+            z : float, redshift
+            R : float, smoothing scale [Mpc/h]
+            type : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+        Return:
+            float : sigma8 value with shape (len(z))
+        '''
+        if not isinstance(z, (int, float)):
+            raise ValueError('Only support one redshift now.')
+        if not isinstance(R, (int, float)):
+            raise ValueError('Only support one smoothing scale now.')
+
+        if type == 'CLASS':
+            h0 = self.Cosmo.h0
+            if cosmo_class is None:
+                cosmo_class = self.get_cosmos_class(z)
+            sigma = cosmo_class.sigma(R/h0, z)
+        elif type == 'Emulator':
+            raise ValueError('For sigma8, we need add the neutrino power emulation.')
+        else:
+            raise ValueError('Type %s not supported yet.'%type)
+        return sigma
+    
+    def get_sigma_cb_z(self, z=None, R=None, type='CLASS', cosmo_class=None):
+        '''
+        Get the sigma_cb(z, R) of tot matter changing with the redshift.
+        
+        Args:
+            z : float, redshift
+            R : float, smoothing scale [Mpc/h]
+            type : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+        Return:
+            float : sigma8 value with shape (len(z))
+        '''
+        if not isinstance(z, (int, float)):
+            raise ValueError('Only support one redshift now.')
+        if not isinstance(R, (int, float)):
+            raise ValueError('Only support one smoothing scale now.')
+
+        if type == 'CLASS':
+            h0 = self.Cosmo.h0
+            if cosmo_class is None:
+                cosmo_class = self.get_cosmos_class(z)
+            sigma_cb = cosmo_class.sigma_cb(R/h0, z)
+        elif type == 'Emulator':
+            kcalc    = np.logspace(-5, 2, 10000)
+            W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+            pcalc    = self.Pkmmlin.get_pkLin(z, kcalc)[0]
+            sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+        else:
+            raise ValueError('Type %s not supported yet.'%type)
+        return sigma_cb
+    
+    def get_sigma8(self, type='CLASS', cosmo_class=None):
+        '''
+        Get the sigma8 of tot matter.
+        
+        Args:
+            type : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+        
+        '''
+        return self.get_sigma_z(0, 8.0, type=type, cosmo_class=cosmo_class)
+    
+    def get_sigma8_cb(self, type='CLASS', cosmo_class=None):
+        '''
+        Get the sigma8 of cb matter.
+        
+        Args:
+            type : string, 'CLASS' or 'Emulator'
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+        
+        '''
+        return self.get_sigma_cb_z(0, 8.0, type=type, cosmo_class=cosmo_class)
         
     def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS', cosmo_class=None):
         '''
