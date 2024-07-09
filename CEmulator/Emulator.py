@@ -62,6 +62,14 @@ class CEmulator:
         cosmos['wa']     = (wa)
         cosmos['mnu']    = (mnu)
         n_params = len(self.param_names)
+        ## check the parameter range / except As 
+        for ind, ikey in enumerate(self.param_names):
+            if ikey != 'A':
+                if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                    raise ValueError(r'Parameter out of range %s = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
+                    raise ValueError(r'Parameter out of range %s = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
+
         if As is not None:
             cosmos['A']      = (As*1e9)
             if sigma8 is not None:
@@ -91,11 +99,12 @@ class CEmulator:
         else:
             raise ValueError('Both As and sigma8 are None, please provide one of them at least.')
         # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
-        ## check the parameter range
-        for ind, ikey in enumerate(self.param_names):
-            if np.any(cosmos[ikey] < self.param_limits[ikey][0]) or \
-               np.any(cosmos[ikey] > self.param_limits[ikey][1]):
-                raise ValueError('Parameter %s out of range.'%ikey)
+        ## check the parameter range for As
+        for ikey in ['A']:
+            if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                raise ValueError(r'Parameter out of range %ss1e9 = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+            elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
+                raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
         ## into the cosmologies array only One cosmology each tim
