@@ -188,9 +188,10 @@ class CEmulator:
             raise ValueError('Only support one smoothing scale now.')
 
         if type == 'CLASS':
-            h0 = self.Cosmo.h0
+            # h0 = self.Cosmo.h0
             if cosmo_class is None:
                 cosmo_class = self.get_cosmos_class(z)
+            h0 = cosmo_class.h()
             sigma = cosmo_class.sigma(R/h0, z)
         elif type == 'Emulator':
             raise ValueError('For sigma8, we need add the neutrino power emulation.')
@@ -216,9 +217,10 @@ class CEmulator:
             raise ValueError('Only support one smoothing scale now.')
 
         if type == 'CLASS':
-            h0 = self.Cosmo.h0
+            # h0 = self.Cosmo.h0
             if cosmo_class is None:
                 cosmo_class = self.get_cosmos_class(z)
+            h0 = cosmo_class.h()
             sigma_cb = cosmo_class.sigma_cb(R/h0, z)
         elif type == 'Emulator':
             kcalc    = np.logspace(-5, 2, 10000)
@@ -250,7 +252,15 @@ class CEmulator:
         
         '''
         return self.get_sigma_cb_z(0, 8.0, type=type, cosmo_class=cosmo_class)
-        
+
+    def _get_Pcurv(self, k=None):
+        As = self.Cosmo.As
+        ns = self.Cosmo.ns
+        h0 = self.Cosmo.h0
+        kp = 0.05 ## Mpc^{-1}
+        Pcurv = lambda k: 2*np.pi*np.pi*As * (h0*k/kp)**(ns-1)/k/k/k
+        return Pcurv(k)
+    
     def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS', cosmo_class=None):
         '''
         Get the halofit power spectrum.
@@ -311,10 +321,14 @@ class CEmulator:
         else:
             if cosmo_class is None:
                 cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
+            if (Pcb) and (cosmo_class.Omega_nu != 0):
+                pkfunc = cosmo_class.pk_cb
+            else:
+                pkfunc = cosmo_class.pk
             pkhalofit = np.zeros((len(z), len(k)))
             h0 = cosmo_class.h()
             for iz in range(len(z)):
-                pkhalofit[iz] = np.array([cosmo_class.pk_cb_hf(ik*h0, z[iz])*h0*h0*h0 
+                pkhalofit[iz] = np.array([pkfunc(ik*h0, z[iz])*h0*h0*h0 
                                           for ik in list(k)])
         return pkhalofit
         
@@ -333,41 +347,43 @@ class CEmulator:
         '''
         z = check_z(self.zlists,     z)
         k = check_k(self.Bkmm.klist, k)
+        ## get the nonlinear transfer for Pcb
+        if   nltype == 'linear':
+                Bkpred = self.Bkmm.get_Bk(z, k)
+        elif nltype == 'halofit':
+                Bkpred = self.Bkmm_halofit.get_Bk(z, k)
+                
         if Pcb:
             if   nltype == 'linear':
-                ## get the nonlinear transfer for Pcb
-                Bkpred = self.Bkmm.get_Bk(z, k)
                 ## get the linear power spectrum for cb
-                kmax = np.max(k)
-                pkcblin = self.get_pklin(z, k, Pcb=Pcb, type=lintype, kmax=kmax, cosmo_class=cosmo_class)
+                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
             elif nltype == 'halofit':
-                ## get the nonlinear transfer for Pcb
-                Bkpred = self.Bkmm_halofit.get_Bk(z, k)
                 ## get the halofit power spectrum for cb
-                pkcblin = self.get_pkhalofit(z, k, Pcb=Pcb, lintype=lintype, cosmo_class=cosmo_class)
+                pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
             pknl = pkcblin * Bkpred
         else:
             if lintype == 'CLASS':
-                if cosmo_class is None:
-                    cosmo_class = self.get_cosmos_class(z)
+                if nltype == 'linear':
+                    if cosmo_class is None:
+                        cosmo_class = self.get_cosmos_class(z, non_linear='none')
+                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
+                elif nltype == 'halofit':
+                    if (cosmo_class is None) or (cosmo_class.pars['non linear'] != 'halofit'):
+                        cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
+                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
                 pknl   = np.zeros_like(pkcblin)
-                h0     = cosmo_class.h()
-                # pklin  = self.get_pklin(z, k, type=lintype, Pcb=Pcb)
+                Pcurv  = self._get_Pcurv(k)
                 pkcbnl = pkcblin * Bkpred
                 if cosmo_class.Omega_nu != 0:
                     for iz in range(len(z)):
                         tkall = cosmo_class.get_transfer(z=z[iz])
-                        # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='linear')
-                        Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='linear')
-                        fb2cb = cosmo_class.Omega_b()/(cosmo_class.Omega0_cdm()+cosmo_class.Omega_b())
-                        fc2cb = cosmo_class.Omega0_cdm()/(cosmo_class.Omega0_cdm()+cosmo_class.Omega_b())
-                        Tkcb  = fc2cb*tkall['d_cdm']+fb2cb*tkall['d_b']
-                        Tkcb_interp = interp1d(tkall['k (h/Mpc)'], Tkcb, kind='linear')
-                        fnu   = cosmo_class.Omega_nu/cosmo_class.Omega_m()
-                        # Tkcb_nu_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*Tkcb, kind='linear')
+                        # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='cubic')
+                        Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='cubic')
+                        fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
+                        fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM
                         ## use the linear neutrino power spectrum to calculate the nonlinear total power spectrum
-                        pknunulin = pkcblin[iz]/Tkcb_interp(k)/Tkcb_interp(k) * Tknusquare_interp(k)
-                        pknl[iz] = (1-fnu)**2*pkcbnl[iz] + fnu*fnu*pknunulin + 2*fnu*(1-fnu)*np.sqrt(pkcbnl[iz]*pknunulin)
+                        pknunulin = Pcurv * Tknusquare_interp(k)
+                        pknl[iz] = fcb2M*fcb2M*pkcbnl[iz] + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl[iz]*pknunulin)
                 else:
                     pknl = pkcblin * Bkpred
             else:

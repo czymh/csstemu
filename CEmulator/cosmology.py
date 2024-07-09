@@ -42,6 +42,7 @@ class Cosmology:
         f_nnu = 7/8*(Gamma_nu**4)*self.Nur # neutrino radiation
         self.OmegaR  = self.Omegag*(1+f_nnu) # Total radiation
         self.OmegaL  = 1 - self.Omegam - self.Omeganu - self.OmegaR
+        self.OmegaM  = self.Omegam + self.Omeganu
         
     def get_Ez(self, z):
         '''
@@ -88,7 +89,7 @@ class Cosmology:
         z = np.atleast_1d(z)
         out = np.zeros((len(z)))
         for iz in range(len(z)):
-            out[iz] = (self.Omegam + self.Omeganu) * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
+            out[iz] = self.OmegaM * (1+z[iz])**3 / self.get_Ez(z[iz]).reshape(-1)**2
         return out
     
     def get_OmegaL(self, z):
