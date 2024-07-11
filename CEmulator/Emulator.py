@@ -36,15 +36,16 @@ class CEmulator:
         self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
         
         
-    def set_cosmos(self, Omegab=0.04897468, Omegam=0.30969282, 
-                   H0=67.66, As=2.105e-9, ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06, sigma8=None):
+    def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
+                   H0=67.66, As=None, sigma8=None, 
+                   ns=0.9665, w=-1.0, wa=0.0, 
+                   mnu=0.06):
         '''
         Set the cosmological parameters.
         
         Args:
             Omegab : float, baryon density
-            Omegam : float, Only baryon and CDM density
+            Omegac : float, CDM density
             H0     : float, Hubble constant
             As     : float, amplitude of the primordial power spectrum
             ns     : float, spectral index
@@ -55,12 +56,14 @@ class CEmulator:
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
-        cosmos['Omegam'] = (Omegam)
+        cosmos['Omegac'] = (Omegac)
         cosmos['H0']     = (H0)
         cosmos['ns']     = (ns)
         cosmos['w']      = (w)
         cosmos['wa']     = (wa)
         cosmos['mnu']    = (mnu)
+        cosmos['Omegam'] = Omegab + Omegac # Only CDM + baryon
+        cosmos.pop('Omegac')
         n_params = len(self.param_names)
         ## check the parameter range / except As 
         for ind, ikey in enumerate(self.param_names):
@@ -351,6 +354,11 @@ class CEmulator:
             lintype     : string, 'CLASS' or 'Emulator'. 
             nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+        
+        .. note::
+           For now, nltype = 'halofit' can give a better result than nltype = 'linear', especially for the high redshift.
+        
+        
         Return:
             array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
