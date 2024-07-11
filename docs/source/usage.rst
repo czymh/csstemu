@@ -33,16 +33,16 @@ Then set the cosmologies you want to use:
 
 .. code-block:: python
 
-   csstemu.set_cosmos(Omegab=Omegab, Omegam=Omegam, H0=h0*100,
-              ns=n_s, As=A_s, w=w0, 
-              wa=wa, mnu=m_nu)
+   csstemu.set_cosmos(Omegab=Omegab, Omegac=Omegam, H0=h0*100,
+                      ns=n_s, As=A_s, w=w0, 
+                      wa=wa, mnu=m_nu)
 
 All these variables can be float numbers or arrays.
 Finally, you can predict the matter power spectrum:
 
 .. code-block:: python
 
-   csstemu.get_pknl(z=zlist, k=klist, Pcb=True, lintype='Emulator', nltype='linear')
+   csstemu.get_pknl(z=zlist, k=klist, Pcb=True, lintype='Emulator', nltype='halofit')
 
 .. autofunction:: CEmulator.Emulator.CEmulator.get_pknl
    :no-index:
