@@ -37,8 +37,10 @@ def check_k(klists, k=None):
     if k is None:
         raise ValueError('Please provide the wavenumber k [h/Mpc].')
     kinput = np.atleast_1d(k)
-    if np.any(kinput < klists[0]) or np.any(kinput > klists[-1]):
-        raise ValueError('Wavenumber k out of range.')
+    if np.any(kinput < klists[0]):
+        raise ValueError('kinput min=%.2f is smaller than the lower limit %.2f.'%(np.min(kinput), klists[0]))
+    if np.any(kinput > klists[-1]):
+        raise ValueError('kinput max=%.2f is larger than the upper limit %.2f.'%(np.max(kinput), klists[-1]))
     if not np.all(np.diff(kinput) > 0.0):
         raise ValueError('k must be strictly increasing!')
     return kinput
