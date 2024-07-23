@@ -302,7 +302,7 @@ class CEmulator:
             OmegaLzall   = self.Cosmo.get_OmegaL(z)
             OmegaMzall   = self.Cosmo.get_OmegaM(z)
             pkhalofit    = np.zeros((len(z), len(k)))
-            kinterp      = np.logspace(-5, 1, 1024)
+            kinterp      = np.logspace(-5, 1, 1024)[1:]
             pklinintp    = self.get_pklin(z, kinterp, Pcb=Pcb, type=lintype)
             for iz in range(len(z)):
                 OmegaLz = OmegaLzall[iz]
