@@ -385,9 +385,10 @@ class CEmulator:
                         cosmo_class = self.get_cosmos_class(z, non_linear='none')
                     pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
                 elif nltype == 'halofit':
-                    if (cosmo_class is None) or (cosmo_class.pars['non linear'] != 'halofit'):
+                    if (cosmo_class is None):
                         cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
-                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
+                    ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
+                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class)
                 pknl   = np.zeros_like(pkcblin)
                 Pcurv  = self._get_Pcurv(k)
                 pkcbnl = pkcblin * Bkpred
