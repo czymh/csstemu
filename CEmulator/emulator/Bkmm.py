@@ -19,7 +19,7 @@ class Bkmm_gp:
         self.__PCA_components = _tmp[1:,:]
         ### load karr
         self.klist = np.load(data_path + 'karr_nb_Nmesh3072.npy')
-        kcut = 10
+        kcut = 10.01
         ind = self.klist<=kcut
         self.klist = self.klist[ind]
         ### Load the Gaussian Process Regression model
@@ -88,7 +88,7 @@ class Bkmm_halofit_gp:
         self.__PCA_components = _tmp[1:,:]
         ### load karr
         self.klist = np.load(data_path + 'karr_nb_Nmesh3072.npy')
-        kcut = 10
+        kcut = 10.01
         ind = self.klist<=kcut
         self.klist = self.klist[ind]
         ### Load the Gaussian Process Regression model
