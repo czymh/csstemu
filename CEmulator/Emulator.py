@@ -1,3 +1,4 @@
+from pickle import NONE
 import numpy as np
 import warnings
 from scipy.integrate import trapz
@@ -39,7 +40,7 @@ class CEmulator:
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
                    ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06):
+                   mnu=0.06, sigma8type='CLASS'):
         '''
         Set the cosmological parameters.
         
@@ -53,6 +54,7 @@ class CEmulator:
             wa     : float, dark energy equation of state evolution
             mnu    : float, sum of neutrino masses with unit eV
             sigma8 : float, amplitude of the total matter power spectrum. If both As and sigma8 are provided, the As will be used. You can set As=None to activate sigma8.
+            sigma8type: str, 'CLASS' or 'CAMB', the method to calculate the sigma8.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -94,7 +96,7 @@ class CEmulator:
                 ## only use the CLASS to calculate the sigma8
                 ## this is slow so we will replace it with the Emulator in the future.
                 self.cosmologies = cosmologies_g
-                sigma8_g = self.get_sigma8(type='CLASS') 
+                sigma8_g = self.get_sigma8(type=sigma8type) 
                 # print('Guess sigma8:', sigma8_g)
                 As = As * sigma8*sigma8/sigma8_g/sigma8_g
             if self.verbose:
@@ -127,17 +129,19 @@ class CEmulator:
         #### from init move to here 
         #### refresh the cosmology class for each cosmology set 
         # cosmo_class = None ## Not store this in the class
-                    
-    def get_cosmos_class(self, z=None, non_linear=None, kmax=10):
+                        
+    def get_cosmo_class(self, z=None, non_linear=None, kmax=10):
         '''
         Get the CLASS cosmology object.
         
         Args:
-            z         : float or array-like, redshift
-            non_linear: string, 'halofit' or 'HMcode'
+            z         : float or array-like, redshift.
+            non_linear: string, None, 'halofit', 'HMcode' or other camb arguments.
+            kmax      : maximum wave number for CLASS calculation.
         '''
         # check_z(z)
-        z = np.atleast_1d(z)
+        # z = np.atleast_1d(z)
+        z = check_z(self.zlists, z)
         str_zlists = "{:.4f}".format(z[0])
         if len(z) > 1:
             for i_z in range(len(z) - 1):
@@ -145,7 +149,22 @@ class CEmulator:
         cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax)
         return cosmo_class
     
-    def get_pklin(self, z=None, k=None, Pcb=True, type='CLASS', cosmo_class=None):
+    def get_camb_results(self, z=None, non_linear=None, kmax=10):
+        '''
+        Get the CAMB results object.
+        
+        Args:
+            z         : float or array-like, redshift
+            non_linear: string, None, 'takahashi' or other camb arguments.
+            kmax      : maximum wave number for CAMB calculation. 
+        '''
+        # z = np.atleast_1d(z)
+        z = check_z(self.zlists, z)
+        ## reverse redshift for CAMB
+        camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax)
+        return camb_results
+    
+    def get_pklin(self, z=None, k=None, Pcb=True, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the linear power spectrum.
         
@@ -153,19 +172,20 @@ class CEmulator:
             z : float or array-like, redshift
             k : float or array-like, wavenumber with unit of [h/Mpc]
             Pcb  : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
-            type : string, 'CLASS' or 'Emulator'
+            type : string, 'Emulator', 'CLASS' or 'CAMB', liner Pk calcultion method.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
         Return:
-            array-like : linear power spectrum with shape (len(z), len(k))
+            array-like : linear power spectrum with shape (len(z), len(k)) 
         '''
         z = check_z(self.zlists,     z)
         # k = check_k(self.Bkmm.klist, k)
         if   type == 'CLASS':
             if cosmo_class is None:
                 kmax = np.max(k)
-                cosmo_class = self.get_cosmos_class(z, kmax=kmax)
+                cosmo_class = self.get_cosmo_class(z, kmax=kmax)
             pklin = np.zeros((len(z), len(k)))
-            if Pcb and cosmo_class.Omega_nu != 0:
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
                 pkfunc = cosmo_class.pk_cb_lin
             else:
                 pkfunc = cosmo_class.pk_lin
@@ -173,24 +193,38 @@ class CEmulator:
             for iz in range(len(z)):
                 pklin[iz] = np.array([pkfunc(ik*h0, z[iz])*h0*h0*h0 
                                       for ik in list(k)])
+        elif type == 'CAMB':
+            if camb_results is None:
+                kmax = np.max(k)
+                camb_results = self.get_camb_results(z, kmax=kmax)
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)): 
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=False, 
+                                                                    var1='delta_nonu', var2='delta_nonu',
+                                                                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=False, 
+                                                                    var1='delta_tot', var2='delta_tot',
+                                                                    hubble_units=True, k_hunit=True)
+            pklin = pkfunc.P(z,k)
         elif type == 'Emulator':
             if Pcb:
                 pklin = self.Pkmmlin.get_pkLin(z, k)
             else:
-                raise ValueError('For total power spectrum, use type=CLASS NOW.')     
+                raise ValueError('For total power spectrum, use type=CLASS or type=CAMB NOW.')   
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
     
-    def get_sigma_z(self, z=None, R=None, type='CLASS', cosmo_class=None):
+    def get_sigma_z(self, z=None, R=None, type='CLASS', cosmo_class=None, camb_results=None):
         '''
         Get the sigma(z, R) of tot matter changing with the redshift.
         
         Args:
             z : float, redshift
             R : float, smoothing scale [Mpc/h]
-            type : string, 'CLASS' or 'Emulator'
+            type : string, 'Emulator', 'CLASS' or 'CAMB' sigma
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
         Return:
             float : sigma8 value with shape (len(z))
         '''
@@ -198,28 +232,41 @@ class CEmulator:
             raise ValueError('Only support one redshift now.')
         if not isinstance(R, (int, float)):
             raise ValueError('Only support one smoothing scale now.')
-
+        # h0 = self.Cosmo.h0 ## if match the sigma8 there is no Cosmo object
+        h0 = self.cosmologies[0][2]/100
         if type == 'CLASS':
-            # h0 = self.Cosmo.h0
             if cosmo_class is None:
-                cosmo_class = self.get_cosmos_class(z)
-            h0 = cosmo_class.h()
+                cosmo_class = self.get_cosmo_class(z)
             sigma = cosmo_class.sigma(R/h0, z)
+        elif type == 'CAMB':
+            if camb_results is None:
+                camb_results = self.get_camb_results(z)
+                zind = 0
+            else:
+                cambzout = np.array(camb_results.transfer_redshifts)
+                if z not in cambzout:
+                    camb_results = self.get_camb_results(z)
+                    zind = 0
+                else:
+                    zind = np.where(cambzout==z)[0][0]
+            sigma = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
+                                            var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
             raise ValueError('For sigma8, we need add the neutrino power emulation.')
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
     
-    def get_sigma_cb_z(self, z=None, R=None, type='CLASS', cosmo_class=None):
+    def get_sigma_cb_z(self, z=None, R=None, type='CLASS', cosmo_class=None, camb_results=None):
         '''
         Get the sigma_cb(z, R) of tot matter changing with the redshift.
         
         Args:
             z : float, redshift
             R : float, smoothing scale [Mpc/h]
-            type : string, 'CLASS' or 'Emulator'
+            type : string, 'Emulator', 'CLASS' or 'CAMB' sigma_cb for cdm + baryon components
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
         Return:
             float : sigma8 value with shape (len(z))
         '''
@@ -227,13 +274,25 @@ class CEmulator:
             raise ValueError('Only support one redshift now.')
         if not isinstance(R, (int, float)):
             raise ValueError('Only support one smoothing scale now.')
-
+        # h0 = self.Cosmo.h0
+        h0 = self.cosmologies[0][2]/100
         if type == 'CLASS':
-            # h0 = self.Cosmo.h0
             if cosmo_class is None:
-                cosmo_class = self.get_cosmos_class(z)
-            h0 = cosmo_class.h()
+                cosmo_class = self.get_cosmo_class(z)
             sigma_cb = cosmo_class.sigma_cb(R/h0, z)
+        elif type == 'CAMB':
+            if camb_results is None:
+                camb_results = self.get_camb_results(z)
+                zind = 0
+            else:
+                cambzout = np.array(camb_results.transfer_redshifts)
+                if z not in cambzout:
+                    camb_results = self.get_camb_results(z)
+                    zind = 0
+                else:
+                    zind = np.where(cambzout==z)[0][0]
+            sigma_cb = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
+                                               var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
             kcalc    = np.logspace(-5, 2, 10000)
             W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
@@ -243,27 +302,27 @@ class CEmulator:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
     
-    def get_sigma8(self, type='CLASS', cosmo_class=None):
+    def get_sigma8(self, type='CLASS', cosmo_class=None, camb_results=None):
         '''
         Get the sigma8 of tot matter.
         
         Args:
-            type : string, 'CLASS' or 'Emulator'
+            type : string, 'Emulator', 'CLASS' or 'CAMB'
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
-        
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
         '''
-        return self.get_sigma_z(0, 8.0, type=type, cosmo_class=cosmo_class)
+        return self.get_sigma_z(0, 8.0, type=type, cosmo_class=cosmo_class, camb_results=camb_results)
     
-    def get_sigma8_cb(self, type='CLASS', cosmo_class=None):
+    def get_sigma8_cb(self, type='CLASS', cosmo_class=None, camb_results=None):
         '''
         Get the sigma8 of cb matter.
         
         Args:
-            type : string, 'CLASS' or 'Emulator'
+            type : string, 'Emulator', 'CLASS' or 'CAMB'
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
-        
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         '''
-        return self.get_sigma_cb_z(0, 8.0, type=type, cosmo_class=cosmo_class)
+        return self.get_sigma_cb_z(0, 8.0, type=type, cosmo_class=cosmo_class, camb_results=camb_results)
 
     def _get_Pcurv(self, k=None):
         As = self.Cosmo.As
@@ -273,21 +332,21 @@ class CEmulator:
         Pcurv = lambda k: 2*np.pi*np.pi*As * (h0*k/kp)**(ns-1)/k/k/k
         return Pcurv(k)
     
-    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='CLASS', cosmo_class=None):
+    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the halofit power spectrum.
        
         .. note:: 
             This version can not converge with CLASS in the high redshift (z>2.5)
             for the c0001 and c0091 (w0 and wa near the lower limit).
-        
        
         Args:
             z           : float or array-like, redshift 
             k           : float or array-like, wavenumber [h/Mpc]
             Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
-            lintype     : string, 'CLASS' or 'Emulator'
+            lintype     : string, 'Emulator', 'CLASS' or 'CAMB' halofit results
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.    
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return: 
             array-like: halofit power spectrum with shape (len(z), len(k))
          
@@ -330,10 +389,10 @@ class CEmulator:
                 nun    = 10.**(5.2105 + 3.6902*neff)
                 pkhalofit[iz] = PkHaloFit(k, Pklin(k), R_sigma, OmegaMz, OmegaLz, fnu, \
                                           an, bn, cn, gamman, alphan, betan, mun, nun)
-        else:
+        elif lintype == 'CLASS':
             if cosmo_class is None:
-                cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
-            if (Pcb) and (cosmo_class.Omega_nu != 0):
+                cosmo_class = self.get_cosmo_class(z, non_linear='halofit')
+            if (Pcb) and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
                 pkfunc = cosmo_class.pk_cb
             else:
                 pkfunc = cosmo_class.pk
@@ -342,23 +401,40 @@ class CEmulator:
             for iz in range(len(z)):
                 pkhalofit[iz] = np.array([pkfunc(ik*h0, z[iz])*h0*h0*h0 
                                           for ik in list(k)])
+        elif lintype == 'CAMB':
+            if camb_results is None:
+                camb_results = self.get_camb_results(z, non_linear='takahashi')
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)): 
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
+                                                                    var1='delta_nonu', var2='delta_nonu',
+                                                                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
+                                                                    var1='delta_tot', var2='delta_tot',
+                                                                    hubble_units=True, k_hunit=True)
+            pkhalofit = pkfunc.P(z,k)
+        else:
+            raise ValueError('Type %s not supported yet.'%type) 
         return pkhalofit
         
-    def get_pknl(self, z=None, k=None, Pcb=True, lintype='CLASS', nltype='linear', cosmo_class=None):
+    def get_pknl(self, z=None, k=None, Pcb=True, lintype='Emulator', nltype='linear', cosmo_class=None, camb_results=None):
         '''
         Get the nonlinear power spectrum.
+        
+        .. note::
+           For now, nltype = 'halofit' can give a better result than nltype = 'linear', especially for the high redshift.
+           For nltype = 'halofit', we only use the 'Emulator' method to generate the halofit Pk for consistency between trainning and output data.
+           The lintype only determine which method to generate the neutrino linear Pk.
+           For nltype = 'linear', lintype determine which method to generate the linear cb and mm Pk.
+           Because the agreements of linear Pk between CAMB, CLASS and Emulator is better than 0.5%.
         
         Args:
             z           : float or array-like, redshift. 
             k           : float or array-like, wavenumber [h/Mpc]. 
-            lintype     : string, 'CLASS' or 'Emulator'. 
+            lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. 
             nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
-        
-        .. note::
-           For now, nltype = 'halofit' can give a better result than nltype = 'linear', especially for the high redshift.
-        
-        
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return:
             array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
@@ -370,42 +446,65 @@ class CEmulator:
         elif nltype == 'halofit':
                 Bkpred = self.Bkmm_halofit.get_Bk(z, k)
                 
-        if Pcb:
+        if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             if   nltype == 'linear':
                 ## get the linear power spectrum for cb
-                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
+                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
             elif nltype == 'halofit':
+                ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                 ## get the halofit power spectrum for cb
-                pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
+                pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results)
             pknl = pkcblin * Bkpred
         else:
+            fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
+            fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM    
             if lintype == 'CLASS':
                 if nltype == 'linear':
-                    if cosmo_class is None:
-                        cosmo_class = self.get_cosmos_class(z, non_linear='none')
+                    if (cosmo_class is None):
+                        cosmo_class = self.get_cosmo_class(z, non_linear=None)
                     pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
                 elif nltype == 'halofit':
                     if (cosmo_class is None):
-                        cosmo_class = self.get_cosmos_class(z, non_linear='halofit')
+                        cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class)
                 pknl   = np.zeros_like(pkcblin)
                 Pcurv  = self._get_Pcurv(k)
                 pkcbnl = pkcblin * Bkpred
-                if cosmo_class.Omega_nu != 0:
+                if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                     for iz in range(len(z)):
                         tkall = cosmo_class.get_transfer(z=z[iz])
                         # Tktotsquare_interp = interp1d(tkall['k (h/Mpc)'], tkall['d_tot']*tkall['d_tot'], kind='cubic')
-                        Tknusquare_interp  = interp1d(tkall['k (h/Mpc)'], tkall['d_ncdm[0]']*tkall['d_ncdm[0]'], kind='cubic')
-                        fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
-                        fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM
+                        Tknusquare_interp  = interp1d(np.log10(tkall['k (h/Mpc)']),                    \
+                                                      np.log10(tkall['d_ncdm[0]']*tkall['d_ncdm[0]']), \
+                                                      kind='linear',                                   \
+                                                      fill_value="extrapolate")
                         ## use the linear neutrino power spectrum to calculate the nonlinear total power spectrum
-                        pknunulin = Pcurv * Tknusquare_interp(k)
+                        pknunulin = Pcurv * (10**Tknusquare_interp(np.log10(k)))
                         pknl[iz] = fcb2M*fcb2M*pkcbnl[iz] + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl[iz]*pknunulin)
                 else:
-                    pknl = pkcblin * Bkpred
+                    raise ValueError('This should not happen!')
+            elif lintype == 'CAMB':
+                if nltype == 'linear':
+                    if (camb_results is None):
+                        camb_results = self.get_camb_results(z, non_linear=None)
+                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results)
+                elif nltype == 'halofit':
+                    if (camb_results is None):
+                        cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
+                    ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
+                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results)
+                pkcbnl = pkcblin * Bkpred
+                if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+                    pkfunc    = camb_results.get_matter_power_interpolator(nonlinear=False, 
+                                                                           var1='delta_nu', var2='delta_nu',
+                                                                           hubble_units=True, k_hunit=True)
+                    pknunulin = pkfunc.P(z, k)
+                    pknl      = fcb2M*fcb2M*pkcbnl + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl*pknunulin) 
+            elif lintype == 'Emulator':
+                raise ValueError('For total power spectrum, only support type=CLASS or CAMB NOW.') 
             else:
-                raise ValueError('For total power spectrum, only support type=CLASS NOW.')                           
+                raise ValueError('Type %s not supported yet.'%type)                         
         return pknl
     
     def _get_bkhmMassBin(self, z=None, k=None):
