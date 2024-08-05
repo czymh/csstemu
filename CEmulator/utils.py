@@ -119,6 +119,36 @@ def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0):
     cosmo_class.compute()
     return cosmo_class
 
+def useCAMB(mypara, zlists, kmax=10.0, non_linear=None):
+    import camb
+    param_names  = ['Omegab', 'Omegam', 'H0', \
+                   'ns', 'A', 'w', 'wa', 'mnu']
+    para = {}
+    for i_n in range(len(param_names)):
+        para[param_names[i_n]] = mypara[i_n]
+    h0 = para['H0']/100
+    pars = camb.CAMBparams()
+    omch2 = (para['Omegam'] - para['Omegab'])*h0*h0; ombh2 = para['Omegab']*h0*h0
+    if para['mnu'] == 0:
+        para['Nncdm'] = 0
+    else:
+        ##### Only for One massive neutrino species
+        para['Nncdm'] = 1
+    pars.set_cosmology(H0=h0*100, omch2=omch2, ombh2=ombh2, 
+                       num_massive_neutrinos=para["Nncdm"], standard_neutrino_neff=3.046, 
+                       mnu=para['mnu'])
+    pars.InitPower.set_params(ns=para['ns'], As=para['A']*1e-9)   ## cosmology 
+    pars.set_dark_energy(w=para['w'], wa=para['wa'], dark_energy_model='ppf')
+    pars.set_matter_power(kmax=kmax, redshifts=zlists)
+    if non_linear is None:
+        nonlinear = False
+    else:
+        nonlinear = True
+        pars.NonLinearModel.set_params(halofit_version=non_linear) #
+        pars.NonLinear = camb.model.NonLinear_both
+    results = camb.get_results(pars)
+    return results
+    
 ## load the trainning cosmologies
 data_path = data_path = os.path.join(os.path.dirname(os.path.abspath(inspect.stack()[0][1])), 'data/')
 cosmoall  = np.load(data_path + 'cosmologies_8d_train_n129_Sobol.npy')
