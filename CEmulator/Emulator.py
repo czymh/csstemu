@@ -1,4 +1,3 @@
-from pickle import NONE
 import numpy as np
 import warnings
 from scipy.integrate import trapz
@@ -294,7 +293,7 @@ class CEmulator:
             sigma_cb = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
                                                var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-5, 2, 10000)
+            kcalc    = np.logspace(-4.99, 1.99, 10000)
             W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
             pcalc    = self.Pkmmlin.get_pkLin(z, kcalc)[0]
             sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
@@ -361,7 +360,7 @@ class CEmulator:
             OmegaLzall   = self.Cosmo.get_OmegaL(z)
             OmegaMzall   = self.Cosmo.get_OmegaM(z)
             pkhalofit    = np.zeros((len(z), len(k)))
-            kinterp      = np.logspace(-5, 1, 1024)[1:]
+            kinterp      = np.logspace(-4.99, 0.99, 1024)
             pklinintp    = self.get_pklin(z, kinterp, Pcb=Pcb, type=lintype)
             for iz in range(len(z)):
                 OmegaLz = OmegaLzall[iz]
@@ -537,7 +536,7 @@ class CEmulator:
         r : float or array-like, wavenumber [Mpc/h]
         '''
         z = check_z(self.zlists, z)
-        ks = np.logspace(-5, 2, 1024)
+        ks = np.logspace(-4.99, 1.99, 1024)
         pkcblin = self.get_pklin(z, ks, type='Emulator', Pcb=True)
         bkhm    = self._get_bkhmMassBin(z, ks)
         ### number density
