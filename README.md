@@ -29,7 +29,8 @@ The accuracy for the matter power spectrum on the whole parameter space is shown
 
 ## Usage
 
-You can see the documentation on [readthedocs](https://csst-emulator.readthedocs.io/en/latest) for details.
+You can see the documentation on [readthedocs](https://csst-emulator.readthedocs.io/en/latest) for more details.
+Some `examples` are shown in the `test` directory.
 
 
 ## Acknowledgements

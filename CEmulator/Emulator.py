@@ -278,7 +278,10 @@ class CEmulator:
         if type == 'CLASS':
             if cosmo_class is None:
                 cosmo_class = self.get_cosmo_class(z)
-            sigma_cb = cosmo_class.sigma_cb(R/h0, z)
+            if np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+                sigma_cb = cosmo_class.sigma(R/h0, z)
+            else:
+                sigma_cb = cosmo_class.sigma_cb(R/h0, z) 
         elif type == 'CAMB':
             if camb_results is None:
                 camb_results = self.get_camb_results(z)
