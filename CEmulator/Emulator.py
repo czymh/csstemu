@@ -5,8 +5,8 @@ from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
-from .emulator.Bkmm import Bkmm_gp, Bkmm_halofit_gp
-from .emulator.PkcbLin import PkcbLin_gp
+from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp
+from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
 from .hankl import P2xi
@@ -29,13 +29,28 @@ class CEmulator:
         '''
         self.verbose = verbose
         self.Cosmo        = Cosmology(verbose=verbose)
-        self.Bkmm         = Bkmm_gp(verbose=verbose) 
-        self.Bkmm_halofit = Bkmm_halofit_gp(verbose=verbose) 
-        self.Pkmmlin      = PkcbLin_gp(verbose=verbose) 
+        self.Bkcb         = Bkcb_gp(verbose=verbose) 
+        self.Bkcb_halofit = Bkcb_halofit_gp(verbose=verbose) 
+        self.Pkcblin      = PkcbLin_gp(verbose=verbose)
+        self.Pknn_cblin   = Pknn_cbLin_gp(verbose=verbose) 
         self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
         self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
+     
+    def __sync_cosmologies(self):
+        '''
+        Sync the cosmologies for all objects with the cosmology class.
+        '''
+        ### normalize the cosmologies with the shape (1, n_params)
+        self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
         
-        
+        ### pass the cosmologies (normalized) to other class
+        self.Bkcb.ncosmo         = self.ncosmo 
+        self.Bkcb_halofit.ncosmo = self.ncosmo
+        self.Pkcblin.ncosmo      = self.ncosmo
+        self.Pknn_cblin.ncosmo   = self.ncosmo  
+        self.XihmMassBin.ncosmo  = self.ncosmo
+        self.PkhmMassBin.ncosmo  = self.ncosmo
+     
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
                    ns=0.9665, w=-1.0, wa=0.0, 
@@ -53,7 +68,7 @@ class CEmulator:
             wa     : float, dark energy equation of state evolution
             mnu    : float, sum of neutrino masses with unit eV
             sigma8 : float, amplitude of the total matter power spectrum. If both As and sigma8 are provided, the As will be used. You can set As=None to activate sigma8.
-            sigma8type: str, 'CLASS' or 'CAMB', the method to calculate the sigma8.
+            sigma8type: str, 'Emulator', 'CLASS' or 'CAMB', the method to calculate the sigma8.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -88,13 +103,12 @@ class CEmulator:
                 cosmologies_g = np.zeros((1, n_params))
                 for ind, ikey in enumerate(self.param_names):
                     cosmologies_g[0,ind] = cosmos[ikey]
-                # ncosmo_g = NormCosmo(cosmologies_g, self.param_names, self.param_limits)
-                # self.Pkmmlin.ncosmo = ncosmo_g
-                # sigma8_g = self.get_sigma8(type='Emulator')
-                
-                ## only use the CLASS to calculate the sigma8
-                ## this is slow so we will replace it with the Emulator in the future.
+                #use 'Emulator', 'CLASS' or 'CAMB' to get sigma8
                 self.cosmologies = cosmologies_g
+                ### set the cosmology class
+                self.Cosmo.set_cosmos(cosmos)
+                self.__sync_cosmologies()
+                
                 sigma8_g = self.get_sigma8(type=sigma8type) 
                 # print('Guess sigma8:', sigma8_g)
                 As = As * sigma8*sigma8/sigma8_g/sigma8_g
@@ -115,20 +129,9 @@ class CEmulator:
         self.cosmologies = np.zeros((1, n_params))
         for ind, ikey in enumerate(self.param_names):
             self.cosmologies[0,ind] = cosmos[ikey]
-        ### normalize the cosmologies with the shape (1, n_params)
-        self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
-        
-        ### pass the cosmologies (normalized) to other class
-        self.Bkmm.ncosmo         = self.ncosmo 
-        self.Bkmm_halofit.ncosmo = self.ncosmo
-        self.Pkmmlin.ncosmo      = self.ncosmo  
-        self.XihmMassBin.ncosmo  = self.ncosmo
-        self.PkhmMassBin.ncosmo  = self.ncosmo
-        
-        #### from init move to here 
-        #### refresh the cosmology class for each cosmology set 
-        # cosmo_class = None ## Not store this in the class
-                        
+        ### sync the cosmologies for all objects
+        self.__sync_cosmologies()
+                                    
     def get_cosmo_class(self, z=None, non_linear=None, kmax=10):
         '''
         Get the CLASS cosmology object.
@@ -178,7 +181,7 @@ class CEmulator:
             array-like : linear power spectrum with shape (len(z), len(k)) 
         '''
         z = check_z(self.zlists,     z)
-        # k = check_k(self.Bkmm.klist, k)
+        # k = check_k(self.Bkcb.klist, k)
         if   type == 'CLASS':
             if cosmo_class is None:
                 kmax = np.max(k)
@@ -207,14 +210,19 @@ class CEmulator:
             pklin = pkfunc.P(z,k)
         elif type == 'Emulator':
             if Pcb:
-                pklin = self.Pkmmlin.get_pkLin(z, k)
+                pklin = self.Pkcblin.get_pkcbLin(z, k)
             else:
-                raise ValueError('For total power spectrum, use type=CLASS or type=CAMB NOW.')   
+                pkcblin = self.Pkcblin.get_pkcbLin(z, k)
+                pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
+                fcb2M   = self.Cosmo.Omegam / self.Cosmo.OmegaM 
+                fnu2M   = self.Cosmo.Omeganu / self.Cosmo.OmegaM
+                pklin   = fcb2M*fcb2M*pkcblin + fnu2M*fnu2M*pknnlin \
+                        + 2*fcb2M*fnu2M*np.sqrt(pkcblin*pknnlin)
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
     
-    def get_sigma_z(self, z=None, R=None, type='CLASS', cosmo_class=None, camb_results=None):
+    def get_sigma_z(self, z=None, R=None, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the sigma(z, R) of tot matter changing with the redshift.
         
@@ -251,12 +259,15 @@ class CEmulator:
             sigma = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
                                             var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
-            raise ValueError('For sigma8, we need add the neutrino power emulation.')
+            kcalc    = np.logspace(-4.99, 1.99, 10000)
+            W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+            pcalc    = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
+            sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
     
-    def get_sigma_cb_z(self, z=None, R=None, type='CLASS', cosmo_class=None, camb_results=None):
+    def get_sigma_cb_z(self, z=None, R=None, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the sigma_cb(z, R) of tot matter changing with the redshift.
         
@@ -298,13 +309,13 @@ class CEmulator:
         elif type == 'Emulator':
             kcalc    = np.logspace(-4.99, 1.99, 10000)
             W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-            pcalc    = self.Pkmmlin.get_pkLin(z, kcalc)[0]
+            pcalc    = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
             sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
     
-    def get_sigma8(self, type='CLASS', cosmo_class=None, camb_results=None):
+    def get_sigma8(self, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the sigma8 of tot matter.
         
@@ -315,7 +326,7 @@ class CEmulator:
         '''
         return self.get_sigma_z(0, 8.0, type=type, cosmo_class=cosmo_class, camb_results=camb_results)
     
-    def get_sigma8_cb(self, type='CLASS', cosmo_class=None, camb_results=None):
+    def get_sigma8_cb(self, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the sigma8 of cb matter.
         
@@ -441,12 +452,12 @@ class CEmulator:
             array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
         z = check_z(self.zlists,     z)
-        k = check_k(self.Bkmm.klist, k)
+        k = check_k(self.Bkcb.klist, k)
         ## get the nonlinear transfer for Pcb
         if   nltype == 'linear':
-                Bkpred = self.Bkmm.get_Bk(z, k)
+                Bkpred = self.Bkcb.get_Bk(z, k)
         elif nltype == 'halofit':
-                Bkpred = self.Bkmm_halofit.get_Bk(z, k)
+                Bkpred = self.Bkcb_halofit.get_Bk(z, k)
                 
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             if   nltype == 'linear':
@@ -504,7 +515,18 @@ class CEmulator:
                     pknunulin = pkfunc.P(z, k)
                     pknl      = fcb2M*fcb2M*pkcbnl + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl*pknunulin) 
             elif lintype == 'Emulator':
-                raise ValueError('For total power spectrum, only support type=CLASS or CAMB NOW.') 
+                if nltype == 'linear':
+                    pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype)
+                elif nltype == 'halofit':
+                    pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype)
+                pkcbnl = pkcblin * Bkpred
+                if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+                    pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
+                    pknl    = fcb2M*fcb2M*pkcbnl  \
+                            + fnu2M*fnu2M*pknnlin \
+                            + 2*fcb2M*fnu2M*np.sqrt(pkcbnl*pknnlin)
+                else:
+                    raise ValueError('This should not happen!')
             else:
                 raise ValueError('Type %s not supported yet.'%type)                         
         return pknl
