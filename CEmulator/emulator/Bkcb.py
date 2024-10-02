@@ -3,13 +3,13 @@ from scipy.interpolate import RectBivariateSpline
 from ..GaussianProcess.GaussianProcess import GaussianProcessRegressor, Constant, RBF 
 from ..utils import cosmoNorm, data_path, zlists, check_k, check_z, MyStandardScaler
 
-class Bkmm_gp:
+class Bkcb_gp:
     zlists = zlists 
     def __init__(self, verbose=False):
         self.verbose = verbose
         n_sample = 129
         if self.verbose:
-            print('Loading the Bkmm emulator...')
+            print('Loading the Bkcb emulator...')
             print('Using %d training samples.'%n_sample)
         self.X_train = cosmoNorm[:n_sample,:]
         self.nvec = 15
@@ -72,13 +72,13 @@ class Bkmm_gp:
         Bkout  = spline(z, k)
         return Bkout
 
-class Bkmm_halofit_gp:
+class Bkcb_halofit_gp:
     zlists = zlists 
     def __init__(self, verbose=False):
         self.verbose = verbose
         n_sample = 129
         if self.verbose:
-            print('Loading the Bkmm_halofit emulator...')
+            print('Loading the Bkcb_halofit emulator...')
             print('Using %d training samples.'%n_sample)
         self.X_train = cosmoNorm[:n_sample,:]
         self.nvec = 20
