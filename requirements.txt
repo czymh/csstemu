@@ -1,6 +1,7 @@
 #### requirements for the CSST Emulator package
-numpy
-scipy
+python==3.9.19 
+numpy==1.26.4
+scipy==1.13.1
 
 
 
