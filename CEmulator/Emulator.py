@@ -431,7 +431,7 @@ class CEmulator:
             raise ValueError('Type %s not supported yet.'%type) 
         return pkhalofit
         
-    def get_pknl(self, z=None, k=None, Pcb=True, lintype='Emulator', nltype='linear', cosmo_class=None, camb_results=None):
+    def get_pknl(self, z=None, k=None, Pcb=True, lintype='Emulator', nltype='halofit', cosmo_class=None, camb_results=None):
         '''
         Get the nonlinear power spectrum.
         
@@ -445,8 +445,9 @@ class CEmulator:
         Args:
             z           : float or array-like, redshift. 
             k           : float or array-like, wavenumber [h/Mpc]. 
-            lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. 
-            nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum.
+            Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default]).
+            lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. Default is 'Emulator'.
+            nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum. Default is 'halofit'.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return:
