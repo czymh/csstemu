@@ -45,6 +45,18 @@ def check_k(klists, k=None):
         raise ValueError('k must be strictly increasing!')
     return kinput
 
+def check_r(rlists, r=None):
+    if r is None:
+        raise ValueError('Please provide the wavenumber r [Mpc/h].')
+    rinput = np.atleast_1d(r)
+    if np.any(rinput < rlists[0]):
+        raise ValueError('r min=%.8f is smaller than the lower limit %.8f.'%(np.min(r), rlists[0]))
+    if np.any(rinput > rlists[-1]):
+        raise ValueError('r max=%.8f is larger than the upper limit %.8f.'%(np.max(r), rlists[-1]))
+    if not np.all(np.diff(rinput) > 0.0):
+        raise ValueError('r must be strictly increasing!')
+    return rinput
+
 def NormCosmo(cosmologies, param_names, param_limits):
     '''
     Normalizes the cosmological parameters to the range [0, 1]

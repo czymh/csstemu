@@ -7,6 +7,7 @@ from scipy.signal import savgol_filter
 from .cosmology import Cosmology
 from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
+from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
 from .hankl import P2xi
@@ -33,6 +34,7 @@ class CEmulator:
         self.Bkcb_halofit = Bkcb_halofit_gp(verbose=verbose) 
         self.Pkcblin      = PkcbLin_gp(verbose=verbose)
         self.Pknn_cblin   = Pknn_cbLin_gp(verbose=verbose) 
+        self.Ximm_cb      = Ximm_cb_gp(verbose=verbose)
         self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
         self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
      
@@ -47,7 +49,8 @@ class CEmulator:
         self.Bkcb.ncosmo         = self.ncosmo 
         self.Bkcb_halofit.ncosmo = self.ncosmo
         self.Pkcblin.ncosmo      = self.ncosmo
-        self.Pknn_cblin.ncosmo   = self.ncosmo  
+        self.Pknn_cblin.ncosmo   = self.ncosmo
+        self.Ximm_cb.ncosmo      = self.ncosmo  
         self.XihmMassBin.ncosmo  = self.ncosmo
         self.PkhmMassBin.ncosmo  = self.ncosmo
      
@@ -532,7 +535,83 @@ class CEmulator:
             else:
                 raise ValueError('Type %s not supported yet.'%type)                         
         return pknl
+
+    def get_ximmhalofit(self, z=None, r=None, Pcb=True):
+        '''
+        Get the matter [cb] correlation function by combining the halofit power spectrum and FFTLog.
+        
+        Args:
+            z : float or array-like, redshift
+            r : float or array-like, wavenumber [Mpc/h]
+            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+        Return:
+            array-like : matter-matter correlation function with shape (len(z), len(r))
+        '''
+        z = check_z(self.zlists, z)
+        if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+            k0 = np.logspace(-4.99, 2, 512)
+            p0 = self.get_pkhalofit(z, k0, Pcb=True, lintype='Emulator')
+            kfft = np.logspace(-4, 4, 512)
+            pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
+                                kind='slinear', fill_value='extrapolate')(np.log10(kfft))
+            ximmhalofit = np.zeros((len(z), len(r)))
+            for iz in range(len(z)):
+                r0, xi0 = P2xi(kfft, pfft[iz], 0)
+                ximmhalofit[iz] = ius(r0, xi0.real)(r)
+        else:
+            raise ValueError('This is coming soon ~~ :)')
+        return ximmhalofit
     
+    def _get_ximmnl_from_pknl(self, z=None, r=None, Pcb=True):
+        '''
+        Get the matter-matter correlation function by combining the pknl and FFTLog.
+        
+        Args:
+            z : float or array-like, redshift
+            r : float or array-like, wavenumber [Mpc/h]
+            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+        Return:
+            array-like : matter-matter correlation function with shape (len(z), len(r))
+        '''
+        z = check_z(self.zlists, z)
+        r = np.atleast_1d(r)
+        k0 = np.logspace(-2.2, 1, 512)
+        p0 = self.get_pknl(z, k0, Pcb=Pcb, lintype='Emulator', nltype='halofit')
+        kfft = np.logspace(-4, 4, 512)
+        pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
+                            kind='slinear', fill_value='extrapolate')(np.log10(kfft))
+        ximmnl = np.zeros((len(z), len(r)))
+        for iz in range(len(z)):
+            r0, xi0 = P2xi(kfft, pfft[iz], 0)
+            ximmnl[iz] = ius(r0, xi0.real)(r)
+        return ximmnl
+        
+    def get_ximmnl(self, z=None, r=None, Pcb=True):
+        '''
+        Get the matter-matter correlation function.
+        
+        Args:
+            z : float or array-like, redshift
+            r : float or array-like, wavenumber [Mpc/h]
+            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+        Return:
+            array-like : matter-matter correlation function with shape (len(z), len(r))
+        '''
+        z = check_z(self.zlists, z)
+        r = np.atleast_1d(r)
+        if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+            ximmhalofit = self.get_ximmhalofit(z=z, r=r, Pcb=Pcb)
+            ximm_dire = ximmhalofit * self.Ximm_cb.get_Br(z=z, r=r)
+            ximm_tree = self._get_ximmnl_from_pknl(z=z, r=r, Pcb=Pcb)
+            rswitch = 40.0
+            ximm_comb = np.zeros_like(ximm_dire)
+            for iz in range(ximm_dire.shape[0]):
+                ximm_comb[iz] = ximm_dire[iz] * np.exp(-(r/rswitch)**4) \
+                              + ximm_tree[iz] * (1 - np.exp(-(r/rswitch)**4))
+        else:
+            raise ValueError('This is coming soon ~~ :)')
+        return ximm_comb  
+   
     def _get_bkhmMassBin(self, z=None, k=None):
         '''
         Get the ratio between halo-matter power spectrum and cb Lin Pk.
