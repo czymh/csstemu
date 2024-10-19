@@ -57,7 +57,7 @@ class CEmulator:
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
                    ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06, sigma8type='CLASS'):
+                   mnu=0.06, sigma8type='Emulator'):
         '''
         Set the cosmological parameters.
         
