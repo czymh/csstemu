@@ -242,9 +242,9 @@ def compute_Rsigma_neff_C(Pklin):
     Curv = rncur
     return rmid, neff, Curv
 
-def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alphan, betan, mun, nun):
+def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alphan, betan, mun, nun, h0):
     y = k * R_sigma
-    f = y/4. + y**2/8.
+    f = y/4. + y*y/8.
     if np.abs(1-Omegamz)>0.01: # /*then omega evolution */
         f1a  = Omegamz**(-0.0732) 
         f2a  = Omegamz**(-0.1423) 
@@ -258,12 +258,12 @@ def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alph
         f3   = frac*f3b + (1-frac)*f3a 
     else:
         f1, f2, f3 = 1., 1., 1.
-    delatfac = 1+fnu*47.48*k*k/(1+1.5*k*k)
-    Delta_L = (k*k*k*pklin/2/np.pi**2) * delatfac
+    delatfac = 1 + fnu*47.48*k*k/(1+1.5*k*k)
+    Delta_L = (k*k*k*pklin/2/np.pi**2)
     ### Two-halo term
-    Delta_Q = Delta_L * ((1+Delta_L)**betan)/(1+alphan*Delta_L) * np.exp(-f)
+    Delta_Q = Delta_L * ((1+Delta_L*delatfac)**betan)/(1+alphan*Delta_L*delatfac) * np.exp(-f)
     ### One-halo term
     Delta_H = an*y**(3*f1) / (1+bn*y**f2 + (cn*y*f3)**(3-gamman))
-    Delta_H = Delta_H / (1. + mun/y + nun/y**2) * (1 + fnu**0.977)
+    Delta_H = Delta_H / (1. + mun/y + nun/y/y) * (1 + fnu*0.977)
     return (Delta_Q + Delta_H) * (2*np.pi**2) / k**3
 

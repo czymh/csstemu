@@ -1,7 +1,8 @@
 import numpy as np
 import warnings
+import time
 from scipy.integrate import trapz
-from scipy.interpolate import interp1d, RectBivariateSpline
+from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpolator
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
@@ -372,14 +373,14 @@ class CEmulator:
             if Pcb:
                 fnu = 0.0
             else:
-                fnu = self.Cosmo.Omeganu/(self.Cosmo.Omegam + self.Cosmo.Omeganu)
-                raise ValueError('For total power spectrum, use type=CLASS NOW.')
+                fnu = self.Cosmo.Omeganu/self.Cosmo.OmegaM
             OmegaLzall   = self.Cosmo.get_OmegaL(z)
             OmegaMzall   = self.Cosmo.get_OmegaM(z)
             pkhalofit    = np.zeros((len(z), len(k)))
+            ## TODO: adjust the maximum k for the interpolation may match the result of CLASS
             ## Notice: adjust the maximum k for the interpolation will affect the result significantly
             kinterp      = np.logspace(-4.99, 1, 1024)
-            pklinintp    = self.get_pklin(z, kinterp, Pcb=Pcb, type=lintype)
+            pklinintp    = self.get_pklin(z=z, k=kinterp, Pcb=Pcb, type=lintype)
             for iz in range(len(z)):
                 OmegaLz = OmegaLzall[iz]
                 OmegaMz = OmegaMzall[iz]
@@ -404,8 +405,9 @@ class CEmulator:
                     + fnu*(1.081 + 0.395*neff*neff)
                 mun    = 0.
                 nun    = 10.**(5.2105 + 3.6902*neff)
+                h0 = self.Cosmo.h0
                 pkhalofit[iz] = PkHaloFit(k, Pklin(k), R_sigma, OmegaMz, OmegaLz, fnu, \
-                                          an, bn, cn, gamman, alphan, betan, mun, nun)
+                                          an, bn, cn, gamman, alphan, betan, mun, nun, h0)
         elif lintype == 'CLASS':
             if cosmo_class is None:
                 cosmo_class = self.get_cosmo_class(z, non_linear='halofit')
@@ -673,3 +675,143 @@ class CEmulator:
             xi_comb[im] = xi_dire[im] * np.exp(-(r/rswitch)**4) \
                         + xi_tree[im] * (1 - np.exp(-(r/rswitch)**4))
         return xi_comb
+
+
+    ###### weak lensing part ######
+    def get_lensing_kernel(self, chi=None, dndz=None, Pcb=False):
+        '''
+        Get the weak lensing kernel.
+        
+        Args:
+            chi : float or array-like, comoving distance [Mpc/h]
+            dndz: tuple, redshift distribution function, tuple (zarr, narr)
+            Pcb : bool, whether to output the total matter (if False [default]) or the cb component (if True )
+            Pcb=True only for my specific case. For general case, you should set Pcb=False.
+        Return:
+            array-like : weak lensing kernel with shape (len(z), len(chi))
+        '''
+        vc  = self.Cosmo.vel_light * 1e-5 # cm/s -> km/s
+        chi = np.atleast_1d(chi)
+        zarr, narr = dndz
+        narr = narr/narr.max()
+        dndzfunc = interp1d(zarr, narr, kind='linear', 
+                            fill_value=0, bounds_error=False)
+        H0 = self.Cosmo.h0 * 100
+        if Pcb:
+            Omegam = self.Cosmo.Omegam
+        else:
+            Omegam = self.Cosmo.OmegaM
+        kernel = np.zeros((len(chi)))
+        z_chi = self.chi2z(chi)
+        for ii, ichi in enumerate(chi):
+            zi = z_chi[ii]
+            ai = 1/(1+zi)
+            zarr  = np.linspace(zi, np.max(zarr), 256+1)
+            narr  = dndzfunc(zarr)
+            dzarr = zarr[1:] - zarr[:-1]
+            znew  = (zarr[1:] + zarr[:-1]) / 2
+            nnew  = (narr[1:] + narr[:-1]) / 2
+            chiz  = self.z2chi(znew)
+            # norm = np.trapz(nnew, znew)
+            norm  = np.sum(nnew*dzarr)
+            if np.isclose(norm, 0, atol=1e-5):
+                kernel[ii] = 0
+            else:
+                warr  = 3*H0*H0*Omegam/2/ai/vc/vc * (ichi*(chiz - ichi)/chiz) * dzarr*nnew # 1/Mpc/Mpc
+                kernel[ii] = np.sum(warr)/norm
+        return kernel
+
+    def get_Cells(self, ells=None, dndz=None, Pcb=False, non_linear='Emulator', verbose=False, use_ccl=False):
+        '''
+        Get the weak lensing power spectrum.
+        
+        Args:
+            ells : float or array-like, multipole
+            dndz : tuple, redshift distribution function, tuple (zarr, narr)
+            Pcb  : bool, whether to output the total matter (if False [default]) or the cb component (if True )
+            non_linear : string, 'Emulator', 'halofit' or 'linear' power spectrum
+            verbose : bool, whether to output the time for each step
+        Return:
+            array-like : weak lensing power spectrum with shape (len(ells))
+        '''
+        ells = np.atleast_1d(ells)
+        zarr, narr = dndz
+        narr = narr/narr.max()
+        
+        nell = len(ells)
+        cl_kappa = np.zeros(nell)
+        zall  = np.linspace(0, np.max(zarr), 100+1, endpoint=True)
+        t00 = time.time()
+        if use_ccl:
+            import pyccl
+            Ob = self.Cosmo.Omegab; Oc  = self.Cosmo.Omegac
+            h0 = self.Cosmo.h0;     As  = self.Cosmo.As
+            ns = self.Cosmo.ns;     mnu = self.Cosmo.mnu
+            w0 = self.Cosmo.w0;     wa  = self.Cosmo.wa
+            cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
+                                                  transfer_function='boltzmann_camb', mass_split='single')
+            func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
+            zinterp   = np.linspace(0, np.max(zarr)+0.1, 10000)
+        else:
+            func = self.Cosmo.comoving_distance
+            zinterp   = np.linspace(0, np.max(zarr)+0.1, 1000)
+        chiinterp = func(zinterp)
+        self.chi2z   = interp1d(chiinterp, zinterp, 
+                                kind='linear') # comoving distance [Mpc] to redshift 
+        self.z2chi   = interp1d(zinterp, chiinterp, 
+                                kind='linear') # redshift to comoving distance [Mpc]
+        chis  = self.z2chi(zall) 
+        dchis = chis[1:] - chis[:-1]
+        chis  = (chis[1:] + chis[:-1]) / 2
+        zall  = (zall[1:] + zall[:-1]) / 2
+        t0 = time.time()
+        if verbose:
+            print('Time for preparing comoving distance interp func:', t0-t00)
+        Wallchi = self.get_lensing_kernel(chi=chis, dndz=dndz, Pcb=Pcb)
+        t1 = time.time()
+        if verbose:
+            print('Time for kernel:', t1-t0)
+        h0 = self.Cosmo.h0
+        if non_linear == 'Emulator':
+            karr  = np.logspace(-2.2, 1.0, 1000)
+            bkarr = self.get_pknl (z=zall, k=karr, Pcb=Pcb, lintype='Emulator', nltype='halofit') \
+                  / self.get_pklin(z=zall, k=karr, Pcb=Pcb,    type='Emulator')
+            bk2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(bkarr)) 
+            karr2    = np.logspace(-4.99, 2, 1000)
+            plarr    = self.get_pklin(z=zall, k=karr2, Pcb=Pcb, type='Emulator')
+            pl2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr2)), values=np.log10(plarr))
+            Pk2Dfunc = lambda z, k: (10**pl2Dfunc(list(zip(z, np.log10(k/h0)))))*(10**bk2Dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
+
+        elif non_linear == 'halofit':
+            karr  = np.logspace(-4.99, 2, 1000)
+            pkarr = self.get_pkhalofit(z=zall, k=karr, Pcb=Pcb, lintype='Emulator')
+            pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
+            Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
+            
+        elif non_linear == 'linear':
+            karr  = np.logspace(-4.99, 2, 1000)
+            pkarr = self.get_pklin(z=zall, k=karr, Pcb=Pcb, type='Emulator')
+            pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
+            Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/0
+             
+        else:
+            raise ValueError('non_linear %s not supported yet.'%non_linear)
+        t2 = time.time()
+        if verbose:
+            print('Time for preparing 2D interpolation:', t2-t1)
+        
+        for i, l in enumerate(ells):
+            k = (l + 0.5)/chis
+            # grid interpolation
+            pkgrid = Pk2Dfunc(z=zall, k=k) 
+            cl_kappa[i] = np.dot(dchis, (pkgrid*Wallchi*Wallchi/chis/chis))
+        t3 = time.time()
+        if verbose:
+            print('Time for ells(n=%d) loop:'%nell, t3-t2)
+            print('Total time:', t3-t00)
+        # clear the interpolation
+        self.chi2z = None
+        self.z2chi = None
+        return cl_kappa
+
+
