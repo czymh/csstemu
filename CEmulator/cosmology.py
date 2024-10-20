@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.integrate import quad, simps
+from scipy.interpolate import interp1d
 from scipy.special import expit
+from .utils import data_path
 
 class Cosmology:
     ## physical constants
@@ -55,8 +57,11 @@ class Cosmology:
         self.TCMB     = 2.7255
         ##### Fix the curvature to be zero
         self.Omegak   = 0.0
-        
+       
     def _F_y(self, y, Fid=0):
+        '''
+        y: float
+        '''
         #### 0, 1 means F(y) and F'(y)
         if Fid == 0:
             F_y_int = lambda x,y: x*x*np.sqrt(x*x + y*y)*expit(-x)
@@ -65,11 +70,9 @@ class Cosmology:
         else:
             raise ValueError("Fid must be 0 or 1.")
         upper = np.inf
-        if isinstance(y, float):
-            return quad(F_y_int, 0, upper, args=(y))[0]
-        elif isinstance(y, np.ndarray) or isinstance(y, list):
-            return np.array([quad(F_y_int, 0, upper, args=(iy))[0] for iy in list(y)])
-    
+        # upper = 1e7
+        return quad(F_y_int, 0, upper, args=(y))[0]
+        
     def _Omeganu_TimesHubbleSquare(self, z):
         fac = 15/np.pi/np.pi/np.pi/np.pi * (self.Gamma_nu**4) * self.Omegag *(1+z)*(1+z)*(1+z)*(1+z)
         T_nu = self.Gamma_nu*self.TCMB
@@ -147,15 +150,19 @@ class Cosmology:
     def comoving_distance(self, z):
         '''
         Get the comoving distance at redshift z.
+        TODO: speed up the calculation
         
         Args:
             z : float or array-like, redshift
         Returns:
-            array-like : 2D array of shape (len(z)), comoving distance
+            array-like : 2D array of shape (len(z)), comoving distance in Mpc
         '''
         z = np.atleast_1d(z)
         aarr = 1/(1+z)
-        out = np.zeros((len(z)))
-        for ia in range(len(aarr)):
-            out[ia] = quad(lambda a: 1e-5*self.vel_light/self.get_Ez(1/a-1)/a/a/self.h0/100, aarr[ia], 1.0)[0]
+        fac     = 1e-5*self.vel_light/self.h0/100
+        chi_int = lambda a: 1/self.get_Ez(1/a-1)/a/a
+        # a_int   = lambda a: np.linspace(a, 1, 256)
+        # out = np.array([simps(chi_int(a_int(ia))) for ia in aarr]) * fac
+        out = np.array([quad(chi_int, ia, 1)[0] for ia in aarr]) * fac
         return out
+    
