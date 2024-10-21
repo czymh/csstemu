@@ -537,7 +537,8 @@ class CEmulator:
             else:
                 raise ValueError('Type %s not supported yet.'%type)                         
         return pknl
-
+    
+    ######## Matter-matter Correlation function ########
     def get_ximmhalofit(self, z=None, r=None, Pcb=True):
         '''
         Get the matter [cb] correlation function by combining the halofit power spectrum and FFTLog.
@@ -613,7 +614,8 @@ class CEmulator:
         else:
             raise ValueError('This is coming soon ~~ :)')
         return ximm_comb  
-   
+    
+    ######## Halo-matter cross correlation function ########
     def _get_bkhmMassBin(self, z=None, k=None):
         '''
         Get the ratio between halo-matter power spectrum and cb Lin Pk.
@@ -676,14 +678,13 @@ class CEmulator:
                         + xi_tree[im] * (1 - np.exp(-(r/rswitch)**4))
         return xi_comb
 
-
     ###### weak lensing part ######
     def get_lensing_kernel(self, chi=None, dndz=None, Pcb=False):
         '''
         Get the weak lensing kernel.
         
         Args:
-            chi : float or array-like, comoving distance [Mpc/h]
+            chi : float or array-like, comoving distance [Mpc]
             dndz: tuple, redshift distribution function, tuple (zarr, narr)
             Pcb : bool, whether to output the total matter (if False [default]) or the cb component (if True )
             Pcb=True only for my specific case. For general case, you should set Pcb=False.
@@ -721,26 +722,58 @@ class CEmulator:
                 kernel[ii] = np.sum(warr)/norm
         return kernel
 
-    def get_Cells(self, ells=None, dndz=None, Pcb=False, non_linear='Emulator', verbose=False, use_ccl=False):
+    def get_kappa_kernel(self, chi=None, z_s=1100, Pcb=False):
+        '''
+        Get the lensing kernel for a specific source redshift.
+        
+        Args:
+            chi : float or array-like, comoving distance [Mpc]
+            z_s : float, source redshift
+            Pcb : bool, whether to output the total matter (if False [default]) or the cb component (if True )
+        Return:
+            array-like : lensing kernel with shape (len(z))
+        '''
+        vc   = self.Cosmo.vel_light * 1e-5 # cm/s -> km/s
+        chi  = np.atleast_1d(chi)
+        aarr = 1/(1+self.chi2z(chi)) 
+        chis = self.Cosmo.comoving_distance(z_s)
+        H0   = self.Cosmo.h0 * 100
+        if Pcb:
+            Omegam = self.Cosmo.Omegam
+        else:
+            Omegam = self.Cosmo.OmegaM
+        return 3*H0*H0*Omegam/2/aarr/vc/vc * (chi*(chis - chi)/chis) # 1/Mpc/Mpc
+
+    def get_Limber_Cells(self, ells=None, dndz=None, z_s=None, Pcb=False, non_linear='Emulator', return_shot_noise=None, verbose=False, use_ccl=False):
         '''
         Get the weak lensing power spectrum.
         
         Args:
             ells : float or array-like, multipole
             dndz : tuple, redshift distribution function, tuple (zarr, narr)
+            z_s  : float, source redshift for single source plane
             Pcb  : bool, whether to output the total matter (if False [default]) or the cb component (if True )
             non_linear : string, 'Emulator', 'halofit' or 'linear' power spectrum
+            return_shot_noise : float, return the shot noise if not None. The vaule should be the shot noise level V_{sim}/N_{sim} [Mpc^3/h^3].
             verbose : bool, whether to output the time for each step
         Return:
             array-like : weak lensing power spectrum with shape (len(ells))
         '''
         ells = np.atleast_1d(ells)
-        zarr, narr = dndz
-        narr = narr/narr.max()
-        
+        if dndz is not None:
+            if z_s is not None:
+                raise ValueError('You should provide the dndz or z_s, not both.')
+            zarr, narr = dndz
+            narr = narr/narr.max()
+            zmax = np.max(zarr)
+        elif z_s is not None:
+            zmax = z_s
+        elif z_s is None:
+            raise ValueError('You should provide the dndz or z_s.')
+            
         nell = len(ells)
         cl_kappa = np.zeros(nell)
-        zall  = np.linspace(0, np.max(zarr), 100+1, endpoint=True)
+        zall  = np.linspace(0, zmax, 100+1, endpoint=True)
         t00 = time.time()
         if use_ccl:
             import pyccl
@@ -751,10 +784,10 @@ class CEmulator:
             cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
                                                   transfer_function='boltzmann_camb', mass_split='single')
             func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
-            zinterp   = np.linspace(0, np.max(zarr)+0.1, 10000)
+            zinterp   = np.linspace(0, zmax+0.1, 10000)
         else:
             func = self.Cosmo.comoving_distance
-            zinterp   = np.linspace(0, np.max(zarr)+0.1, 1000)
+            zinterp   = np.linspace(0, zmax+0.1, 1000)
         chiinterp = func(zinterp)
         self.chi2z   = interp1d(chiinterp, zinterp, 
                                 kind='linear') # comoving distance [Mpc] to redshift 
@@ -767,35 +800,41 @@ class CEmulator:
         t0 = time.time()
         if verbose:
             print('Time for preparing comoving distance interp func:', t0-t00)
-        Wallchi = self.get_lensing_kernel(chi=chis, dndz=dndz, Pcb=Pcb)
+        if dndz is not None:
+            Wallchi = self.get_lensing_kernel(chi=chis, dndz=dndz, Pcb=Pcb)
+        elif z_s is not None:
+            Wallchi = self.get_kappa_kernel(chi=chis, z_s=z_s, Pcb=Pcb)
         t1 = time.time()
         if verbose:
             print('Time for kernel:', t1-t0)
         h0 = self.Cosmo.h0
-        if non_linear == 'Emulator':
-            karr  = np.logspace(-2.2, 1.0, 1000)
-            bkarr = self.get_pknl (z=zall, k=karr, Pcb=Pcb, lintype='Emulator', nltype='halofit') \
-                  / self.get_pklin(z=zall, k=karr, Pcb=Pcb,    type='Emulator')
-            bk2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(bkarr)) 
-            karr2    = np.logspace(-4.99, 2, 1000)
-            plarr    = self.get_pklin(z=zall, k=karr2, Pcb=Pcb, type='Emulator')
-            pl2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr2)), values=np.log10(plarr))
-            Pk2Dfunc = lambda z, k: (10**pl2Dfunc(list(zip(z, np.log10(k/h0)))))*(10**bk2Dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
+        if return_shot_noise is None:
+            if non_linear == 'Emulator':
+                karr  = np.logspace(-2.2, 1.0, 1000)
+                bkarr = self.get_pknl (z=zall, k=karr, Pcb=Pcb, lintype='Emulator', nltype='halofit') \
+                    / self.get_pklin(z=zall, k=karr, Pcb=Pcb,    type='Emulator')
+                bk2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(bkarr)) 
+                karr2    = np.logspace(-4.99, 2, 1000)
+                plarr    = self.get_pklin(z=zall, k=karr2, Pcb=Pcb, type='Emulator')
+                pl2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr2)), values=np.log10(plarr))
+                Pk2Dfunc = lambda z, k: (10**pl2Dfunc(list(zip(z, np.log10(k/h0)))))*(10**bk2Dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
 
-        elif non_linear == 'halofit':
-            karr  = np.logspace(-4.99, 2, 1000)
-            pkarr = self.get_pkhalofit(z=zall, k=karr, Pcb=Pcb, lintype='Emulator')
-            pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
-            Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
-            
-        elif non_linear == 'linear':
-            karr  = np.logspace(-4.99, 2, 1000)
-            pkarr = self.get_pklin(z=zall, k=karr, Pcb=Pcb, type='Emulator')
-            pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
-            Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/0
-             
+            elif non_linear == 'halofit':
+                karr  = np.logspace(-4.99, 2, 1000)
+                pkarr = self.get_pkhalofit(z=zall, k=karr, Pcb=Pcb, lintype='Emulator')
+                pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
+                Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
+                
+            elif non_linear == 'linear':
+                karr  = np.logspace(-4.99, 2, 1000)
+                pkarr = self.get_pklin(z=zall, k=karr, Pcb=Pcb, type='Emulator')
+                pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
+                Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
+                
+            else:
+                raise ValueError('non_linear %s not supported yet.'%non_linear)
         else:
-            raise ValueError('non_linear %s not supported yet.'%non_linear)
+            Pk2Dfunc = lambda z, k: return_shot_noise /h0/h0/h0 * np.ones_like(k)
         t2 = time.time()
         if verbose:
             print('Time for preparing 2D interpolation:', t2-t1)
@@ -813,5 +852,5 @@ class CEmulator:
         self.chi2z = None
         self.z2chi = None
         return cl_kappa
-
-
+    
+    
