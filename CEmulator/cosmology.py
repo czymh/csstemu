@@ -5,12 +5,6 @@ from scipy.special import expit
 from .utils import data_path
 
 class Cosmology:
-    ## physical constants
-    sigma_B   = 5.670373e-5; 
-    vel_light = 2.99792458e10; # cm/s
-    G_const   = 6.672e-8; 
-    h0_units  = 3.2407789e-18; # h/sec
-    kB        = 8.617333262145e-5   ## boltzman in eV/K
 
     def __init__(self, verbose=False):
         '''
@@ -20,9 +14,14 @@ class Cosmology:
             verbose : bool, whether to output the running information
         
         '''
-        
-        self.rho_crit = 2.77536627e11 # h^2 Msun/Mpc^3
-        
+        ## physical constants
+        self.sigma_B   = 5.670373e-5; 
+        self.vel_light = 2.99792458e10; # cm/s
+        self.G_const   = 6.672e-8; 
+        self.h0_units  = 3.2407789e-18; # h/sec
+        self.kB        = 8.617333262145e-5   ## boltzman in eV/K
+        self.rho_crit  = 2.77536627e11 # h^2 Msun/Mpc^3
+            
     def set_cosmos(self, cosmologies):
         '''
         set the cosmologies for the cosmology class
