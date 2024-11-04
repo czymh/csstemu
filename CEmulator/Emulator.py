@@ -784,10 +784,10 @@ class CEmulator:
             cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
                                                   transfer_function='boltzmann_camb', mass_split='single')
             func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
-            zinterp   = np.linspace(0, zmax+0.1, 10000)
+            zinterp   = np.linspace(0, zmax, 10000)
         else:
             func = self.Cosmo.comoving_distance
-            zinterp   = np.linspace(0, zmax+0.1, 1000)
+            zinterp   = np.linspace(0, zmax, 1000)
         chiinterp = func(zinterp)
         self.chi2z   = interp1d(chiinterp, zinterp, 
                                 kind='linear') # comoving distance [Mpc] to redshift 
