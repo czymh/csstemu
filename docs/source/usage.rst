@@ -6,11 +6,11 @@ Usage
 Installation
 ------------
 
-To use CSST Emulator, you just need get the source code from GitHub for now:
+To use CSST Emulator, you can install it via pip:
 
 .. code-block:: console
 
-   (.venv) $ git clone https://github.com/czymh/csstemu.git
+   $ pip install git+https://github.com/czymh/csstemu
 
 Creating recipes
 ----------------
@@ -19,8 +19,6 @@ To use the package, you need add the code directory to your Python path:
 
 .. code-block:: python
 
-   import sys
-   sys.path.append('path/to/csstemu')
    from CEmulator.Emulator import CEmulator
 
 Firstly, you need to create an object of the class :py:class:`CEmulator`:
@@ -33,7 +31,7 @@ Then set the cosmologies you want to use:
 
 .. code-block:: python
 
-   csstemu.set_cosmos(Omegab=Omegab, Omegac=Omegam, H0=h0*100,
+   csstemu.set_cosmos(Omegab=Omegab, Omegac=Omegac, H0=h0*100,
                       ns=n_s, As=A_s, w=w0, 
                       wa=wa, mnu=m_nu)
 

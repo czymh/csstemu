@@ -36,6 +36,15 @@ The accuracy for the matter power spectrum on the whole parameter space is shown
 - `CLASS` [optional]
 - `CCL`   [optional]
 
+## Installation
+
+You can install this package via pip:
+
+```bash
+pip install git+https://github.com/czymh/csstemu
+```
+
+
 ## Usage
 
 You can see the documentation on [readthedocs](https://csst-emulator.readthedocs.io/en/latest) for more details.

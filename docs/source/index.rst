@@ -38,7 +38,8 @@ how to :ref:`installation` the project.
 
 .. note::
 
-   This project is under active development.
+   This project is under **active** development. 
+   You can visit the `GitHub repository <https://github.com/czymh/csstemu/dev>` for the latest updates.
 
 Contents
 --------
@@ -51,4 +52,4 @@ Contents
 Acknowledgement
 ---------------
 
-Feel free to contact <chyiru@sjtu.edu.cn> if you have any questions.
+Feel free to contact <chyiru@sjtu.edu.cn> or leave an issue on the GitHub if you have any questions.
