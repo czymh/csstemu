@@ -1,10 +1,9 @@
 ## China Space Station Telescope (CSST) Emulator
 
 A python package for CSST cosmological emulator.
-This package is dependent on `numpy`, `scipy` and `classy` packages.
-In the near future, `classy` dependence will be removed by the emulator method.
+This package is only dependent on `numpy`, `scipy` packages.
 All the gaussian process trainings have been done in advance.
-The whole package predicts the cosmological statistics accroding to the matrix calculation with ~ **1 millisecond per cosmology**.
+The whole package predicts the cosmological statistics [e.g., nonlinear matter power spectrum] with ~ **1 millisecond per cosmology**.
 
 The parameter space are shown as followed:
 | Parameter | Lower Limit | Upper Limit |
