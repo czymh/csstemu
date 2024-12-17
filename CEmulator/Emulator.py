@@ -554,7 +554,7 @@ class CEmulator:
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             k0 = np.logspace(-4.99, 2, 512)
             p0 = self.get_pkhalofit(z, k0, Pcb=True, lintype='Emulator')
-            kfft = np.logspace(-4, 4, 512)
+            kfft = np.logspace(-5, 2, 1024)
             pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
                                 kind='slinear', fill_value='extrapolate')(np.log10(kfft))
             ximmhalofit = np.zeros((len(z), len(r)))
@@ -580,7 +580,7 @@ class CEmulator:
         r = np.atleast_1d(r)
         k0 = np.logspace(-2.2, 1, 512)
         p0 = self.get_pknl(z, k0, Pcb=Pcb, lintype='Emulator', nltype='halofit')
-        kfft = np.logspace(-4, 4, 512)
+        kfft = np.logspace(-5, 2, 1024)
         pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
                             kind='slinear', fill_value='extrapolate')(np.log10(kfft))
         ximmnl = np.zeros((len(z), len(r)))
