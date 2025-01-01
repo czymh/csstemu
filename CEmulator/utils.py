@@ -165,7 +165,8 @@ def useCAMB(mypara, zlists, kmax=10.0, non_linear=None):
 data_path = data_path = os.path.join(os.path.dirname(os.path.abspath(inspect.stack()[0][1])), 'data/')
 cosmoall  = np.load(data_path + 'cosmologies_8d_train_n129_Sobol.npy')
 cosmoNorm = NormCosmo(cosmoall, param_names, param_limits)
-
+cosmoallLarge  = np.load(data_path + 'cosmologies_8d_train_n513_Sobol.npy')
+cosmoNormLarge = NormCosmo(cosmoallLarge, param_names, param_limits)
 
 ##### for the halofit computation
 
