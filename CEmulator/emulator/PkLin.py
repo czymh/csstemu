@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from ..GaussianProcess.GaussianProcess import GaussianProcessRegressor, Constant, RBF 
-from ..utils import data_path, zlists, param_limits, param_names, check_k, check_z, NormCosmo, MyStandardScaler
+from ..utils import data_path, zlists, check_k, check_z, MyStandardScaler, cosmoNormLarge
 
 class PkcbLin_gp:
     zlists = zlists 
@@ -11,9 +11,8 @@ class PkcbLin_gp:
         if self.verbose:
             print('Loading the PkcbLin emulator...')
             print('Using %d training samples.'%n_sample)
-        cosmoallLarge  = np.load(data_path + 'cosmologies_8d_train_n513_Sobol.npy')
-        cosmoNormLarge = NormCosmo(cosmoallLarge, param_names, param_limits)
-        self.X_train = cosmoNormLarge[:n_sample,:]
+        indexs = np.arange(513)
+        self.X_train = cosmoNormLarge[indexs,:]
         self.nvec = 20
         ### load the PCA transformation matrix
         _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgpkLin_n%d.npy'%(self.nvec, n_sample))
@@ -71,18 +70,17 @@ class PkcbLin_gp:
         return pkout
     
 class Pknn_cbLin_gp:
-    zlists = zlists 
-    def __init__(self, verbose=False):
+    zlists = zlists  
+    def __init__(self, verbose=False): 
         self.verbose = verbose
         n_sample = 512
         if self.verbose:
             print('Loading the PknnLin emulator...')
             print('Using %d training samples [remove c0001 (no massive neutrino)].'%n_sample)
-        cosmoallLarge  = np.load(data_path + 'cosmologies_8d_train_n513_Sobol.npy')
         # remove c0001
-        cosmoallLarge  = np.delete(cosmoallLarge, 1, axis=0)
-        cosmoNormLarge = NormCosmo(cosmoallLarge, param_names, param_limits)
-        self.X_train = cosmoNormLarge[:n_sample,:]
+        indexs = np.arange(513)
+        indexs = np.delete(indexs, 1)
+        self.X_train = cosmoNormLarge[indexs,:]
         self.nvec = 10
         ### load the PCA transformation matrix
         _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgpkLin_nn_cb_n%d.npy'%(self.nvec, n_sample))

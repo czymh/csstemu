@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpol
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
-from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp
+from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
 from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
@@ -30,14 +30,16 @@ class CEmulator:
         
         '''
         self.verbose = verbose
-        self.Cosmo        = Cosmology(verbose=verbose)
-        self.Bkcb         = Bkcb_gp(verbose=verbose) 
-        self.Bkcb_halofit = Bkcb_halofit_gp(verbose=verbose) 
-        self.Pkcblin      = PkcbLin_gp(verbose=verbose)
-        self.Pknn_cblin   = Pknn_cbLin_gp(verbose=verbose) 
-        self.Ximm_cb      = Ximm_cb_gp(verbose=verbose)
-        self.XihmMassBin  = XihmMassBin_gp(verbose=verbose) 
-        self.PkhmMassBin  = PkhmMassBin_gp(verbose=verbose)  
+        self.Cosmo           = Cosmology(verbose=verbose)
+        self.Bkcb            = Bkcb_gp(verbose=verbose) 
+        self.Bkcb_halofit    = Bkcb_halofit_gp(verbose=verbose) 
+        self.Bkcb_lin2hmcode = Bkcb_lin2hmcode_gp(verbose=verbose)
+        self.Bkcb_hmcode2020 = Bkcb_hmcode2020_gp(verbose=verbose)
+        self.Pkcblin         = PkcbLin_gp(verbose=verbose)
+        self.Pknn_cblin      = Pknn_cbLin_gp(verbose=verbose) 
+        self.Ximm_cb         = Ximm_cb_gp(verbose=verbose)
+        self.XihmMassBin     = XihmMassBin_gp(verbose=verbose) 
+        self.PkhmMassBin     = PkhmMassBin_gp(verbose=verbose)  
      
     def __sync_cosmologies(self):
         '''
@@ -47,13 +49,15 @@ class CEmulator:
         self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
         
         ### pass the cosmologies (normalized) to other class
-        self.Bkcb.ncosmo         = self.ncosmo 
-        self.Bkcb_halofit.ncosmo = self.ncosmo
-        self.Pkcblin.ncosmo      = self.ncosmo
-        self.Pknn_cblin.ncosmo   = self.ncosmo
-        self.Ximm_cb.ncosmo      = self.ncosmo  
-        self.XihmMassBin.ncosmo  = self.ncosmo
-        self.PkhmMassBin.ncosmo  = self.ncosmo
+        self.Bkcb.ncosmo            = self.ncosmo 
+        self.Bkcb_halofit.ncosmo    = self.ncosmo
+        self.Bkcb_lin2hmcode.ncosmo = self.ncosmo
+        self.Bkcb_hmcode2020.ncosmo = self.ncosmo
+        self.Pkcblin.ncosmo         = self.ncosmo
+        self.Pknn_cblin.ncosmo      = self.ncosmo
+        self.Ximm_cb.ncosmo         = self.ncosmo  
+        self.XihmMassBin.ncosmo     = self.ncosmo
+        self.PkhmMassBin.ncosmo     = self.ncosmo
      
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
@@ -170,14 +174,14 @@ class CEmulator:
         camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax)
         return camb_results
     
-    def get_pklin(self, z=None, k=None, Pcb=True, type='Emulator', cosmo_class=None, camb_results=None):
+    def get_pklin(self, z=None, k=None, Pcb=False, type='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the linear power spectrum.
         
         Args:
             z : float or array-like, redshift
             k : float or array-like, wavenumber with unit of [h/Mpc]
-            Pcb  : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            Pcb  : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
             type : string, 'Emulator', 'CLASS' or 'CAMB', liner Pk calcultion method.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
@@ -349,7 +353,7 @@ class CEmulator:
         Pcurv = lambda k: 2*np.pi*np.pi*As * (h0*k/kp)**(ns-1)/k/k/k
         return Pcurv(k)
     
-    def get_pkhalofit(self, z=None, k=None, Pcb=True, lintype='Emulator', cosmo_class=None, camb_results=None):
+    def get_pkhalofit(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None):
         '''
         Get the halofit power spectrum.
        
@@ -360,7 +364,7 @@ class CEmulator:
         Args:
             z           : float or array-like, redshift 
             k           : float or array-like, wavenumber [h/Mpc]
-            Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            Pcb         : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
             lintype     : string, 'Emulator', 'CLASS' or 'CAMB' halofit results
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.    
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
@@ -435,14 +439,56 @@ class CEmulator:
         else:
             raise ValueError('Type %s not supported yet.'%type) 
         return pkhalofit
+    
+    def get_pkHMCODE2020(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None):
+        '''
+        Get the linear power spectrum from HMCODE2020.
         
-    def get_pknl(self, z=None, k=None, Pcb=True, lintype='Emulator', nltype='halofit', cosmo_class=None, camb_results=None):
+        Args:
+            z           : float or array-like, redshift
+            k           : float or array-like, wavenumber [h/Mpc]
+            lintype     : string, 'Emulator', 'CLASS' or 'CAMB' halofit results
+            Pcb         : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
+            cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
+            camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB.
+        Return:
+            array-like : linear power spectrum with shape (len(z), len(k))
+        '''
+        z = check_z(self.zlists,     z)
+        if  lintype == 'Emulator':
+            if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
+                Bkcbhmcode = self.Bkcb_lin2hmcode.get_Bk(z, k)
+                ## get the linear power spectrum for cb
+                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
+                pkhmcode = pkcblin * Bkcbhmcode
+            else:
+                raise ValueError('Only support the cb power spectrum [Pcb=True] now.')
+            
+        elif lintype == 'CLASS':
+            raise ValueError('CLASS does not support the HMCODE2020 yet.')
+        elif lintype == 'CAMB':
+            if camb_results is None:
+                camb_results = self.get_camb_results(z, non_linear='mead2020')
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)): 
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
+                                                                    var1='delta_nonu', var2='delta_nonu',
+                                                                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
+                                                                    var1='delta_tot', var2='delta_tot',
+                                                                    hubble_units=True, k_hunit=True)
+            pkhmcode = pkfunc.P(z,k)
+        else:
+            raise ValueError('Type %s not supported yet.'%type) 
+        return pkhmcode 
+      
+    def get_pknl(self, z=None, k=None, Pcb=False, lintype='Emulator', nltype='hmcode2020', cosmo_class=None, camb_results=None):
         '''
         Get the nonlinear power spectrum.
         
         .. note::
-           For now, nltype = 'halofit' can give a better result than nltype = 'linear', especially for the high redshift.
-           For nltype = 'halofit', we only use the 'Emulator' method to generate the halofit Pk for consistency between trainning and output data.
+           For now, nltype = 'hmcode2020', 'halofit' can give a better result than nltype = 'linear'.
+           For nltype = 'halofit' or 'hmcode2020', we only use the 'Emulator' method to generate the halofit Pk for consistency between trainning and output data.
            The lintype only determine which method to generate the neutrino linear Pk.
            For nltype = 'linear', lintype determine which method to generate the linear cb and mm Pk.
            Because the agreements of linear Pk between CAMB, CLASS and Emulator is better than 0.5%.
@@ -450,9 +496,9 @@ class CEmulator:
         Args:
             z           : float or array-like, redshift. 
             k           : float or array-like, wavenumber [h/Mpc]. 
-            Pcb         : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default]).
+            Pcb         : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True).
             lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. Default is 'Emulator'.
-            nltype      : string, 'linear' or 'halofit'.  'linear' means ratio of nonlinear to linear power spectrum. 'halofit' means ratio of nonlinear to halofit power spectrum. Default is 'halofit'.
+            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.  means ratio of nonlinear to **nltype** power spectrum. Default is 'hmcode2020'.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return:
@@ -462,10 +508,11 @@ class CEmulator:
         k = check_k(self.Bkcb.klist, k)
         ## get the nonlinear transfer for Pcb
         if   nltype == 'linear':
-                Bkpred = self.Bkcb.get_Bk(z, k)
+            Bkpred = self.Bkcb.get_Bk(z, k)
         elif nltype == 'halofit':
-                Bkpred = self.Bkcb_halofit.get_Bk(z, k)
-                
+            Bkpred = self.Bkcb_halofit.get_Bk(z, k)
+        elif nltype == 'hmcode2020':
+            Bkpred = self.Bkcb_hmcode2020.get_Bk(z, k)
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             if   nltype == 'linear':
                 ## get the linear power spectrum for cb
@@ -474,6 +521,8 @@ class CEmulator:
                 ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                 ## get the halofit power spectrum for cb
                 pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results)
+            elif nltype == 'hmcode2020':
+                pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
             pknl = pkcblin * Bkpred
         else:
             fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
@@ -488,6 +537,10 @@ class CEmulator:
                         cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class)
+                elif nltype == 'hmcode2020':
+                    if (cosmo_class is None):
+                        cosmo_class = self.get_cosmo_class(z, non_linear='mead2020')
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
                 pknl   = np.zeros_like(pkcblin)
                 Pcurv  = self._get_Pcurv(k)
                 pkcbnl = pkcblin * Bkpred
@@ -514,6 +567,10 @@ class CEmulator:
                         cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results)
+                elif nltype == 'hmcode2020':
+                    if (camb_results is None):
+                        camb_results = self.get_camb_results(z, non_linear='mead2020')
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, camb_results=camb_results)
                 pkcbnl = pkcblin * Bkpred
                 if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                     pkfunc    = camb_results.get_matter_power_interpolator(nonlinear=False, 
@@ -526,6 +583,8 @@ class CEmulator:
                     pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype)
                 elif nltype == 'halofit':
                     pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype)
+                elif nltype == 'hmcode2020':
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype)
                 pkcbnl = pkcblin * Bkpred
                 if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                     pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
@@ -539,14 +598,14 @@ class CEmulator:
         return pknl
     
     ######## Matter-matter Correlation function ########
-    def get_ximmhalofit(self, z=None, r=None, Pcb=True):
+    def get_ximmhalofit(self, z=None, r=None, Pcb=False):
         '''
         Get the matter [cb] correlation function by combining the halofit power spectrum and FFTLog.
         
         Args:
             z : float or array-like, redshift
             r : float or array-like, wavenumber [Mpc/h]
-            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            Pcb : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
@@ -565,14 +624,14 @@ class CEmulator:
             raise ValueError('This is coming soon ~~ :)')
         return ximmhalofit
     
-    def _get_ximmnl_from_pknl(self, z=None, r=None, Pcb=True):
+    def _get_ximmnl_from_pknl(self, z=None, r=None, Pcb=False):
         '''
         Get the matter-matter correlation function by combining the pknl and FFTLog.
         
         Args:
             z : float or array-like, redshift
             r : float or array-like, wavenumber [Mpc/h]
-            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            Pcb : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
@@ -589,14 +648,14 @@ class CEmulator:
             ximmnl[iz] = ius(r0, xi0.real)(r)
         return ximmnl
         
-    def get_ximmnl(self, z=None, r=None, Pcb=True):
+    def get_ximmnl(self, z=None, r=None, Pcb=False):
         '''
         Get the matter-matter correlation function.
         
         Args:
             z : float or array-like, redshift
             r : float or array-like, wavenumber [Mpc/h]
-            Pcb : bool, whether to output the total power spectrum (if False) or the cb power spectrum (if True [default])
+            Pcb : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True)
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
