@@ -26,7 +26,7 @@ Up to now, the supportted statistics include:
 6. comming soon ~~ :).
 
 The accuracy for the matter power spectrum on the whole parameter space is shown as followed:
-![The leave-one-out error of non-linear power spectrum.](./test/pic/LeaveOneOutError-Bk-hmcode2020-N129.png)
+![The leave-one-out error of non-linear power spectrum for hmcode2020-based emulator.](./test/pic/LeaveOneOutError-Bk-hmcode2020-N129.png)
 
 ## Dependence
 
