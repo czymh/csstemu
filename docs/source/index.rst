@@ -40,13 +40,13 @@ how to :ref:`installation` the project.
 .. note::
 
    This project is under **active** development. 
-   You can visit the `GitHub repository <https://github.com/czymh/csstemu/dev>` for the latest updates.
+   You can visit the `GitHub repository <https://github.com/czymh/csstemu/dev>`__ for the latest updates.
 
 Contents
 --------
 
 .. toctree::
-   
+
    cosmologies
    usage
    api
