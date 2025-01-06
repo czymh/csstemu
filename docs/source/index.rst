@@ -46,9 +46,11 @@ Contents
 --------
 
 .. toctree::
-
+   
+   cosmologies
    usage
    api
+   
 
 Acknowledgement
 ---------------
