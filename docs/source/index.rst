@@ -33,6 +33,7 @@ So it can achieve a high accuracy in a wide range of cosmological parameters as 
 | :math:`\sum M_{\nu}`          | 0           | 0.3         |
 +-------------------------------+-------------+-------------+
 
+The detailed cosmologies can be found in the :doc:`cosmologies` section.
 Check out the :doc:`usage` section for further information, including
 how to :ref:`installation` the project.
 
