@@ -26,8 +26,6 @@ Much larger changes between different subplots than previous plot, which indicat
 
    24 Mpc/h density plot. Download here: :download:`2.7M dpi=100 PNG <./pic/halo_lowres_arrayplots.png>`. A high resolution version is available :download:`24M dpi=300 PNG <./pic/halo_arrayplots.png>`.
 
-For the high resolution plots, you can 
-
 Other visualizations are coming soon.
 
 
