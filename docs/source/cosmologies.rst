@@ -1,5 +1,5 @@
-Cosmology Table
-===============
+Cosmology
+=========
 
 The following is a listing of all cosmologies used in CSST trainning simulations.
 You can also download the Parameter table as a `CSV file <https://github.com/czymh/csstemu/tree/dev/docs/source/csst_cosmo_params.csv>`__.

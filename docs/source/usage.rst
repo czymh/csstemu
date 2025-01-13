@@ -1,5 +1,5 @@
-Usage
-=====
+Quick Usage
+===========
 
 .. _installation:
 
@@ -11,6 +11,14 @@ To use CSST Emulator, you can install it via pip:
 .. code-block:: console
 
    $ pip install git+https://github.com/czymh/csstemu
+
+for the stable version, or
+
+.. code-block:: console
+
+   $ pip install git+https://github.com/czymh/csstemu/tree/dev
+
+for the development version to use the latest function.
 
 Creating recipes
 ----------------
@@ -40,7 +48,7 @@ Finally, you can predict the matter power spectrum:
 
 .. code-block:: python
 
-   csstemu.get_pknl(z=zlist, k=klist, Pcb=True, lintype='Emulator', nltype='halofit')
+   csstemu.get_pknl(z=zlist, k=klist, Pcb=False, lintype='Emulator', nltype='hmcode2020')
 
 .. autofunction:: CEmulator.Emulator.CEmulator.get_pknl
    :no-index:

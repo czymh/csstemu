@@ -46,11 +46,16 @@ Contents
 --------
 
 .. toctree::
-
-   cosmologies
+   :maxdepth: 2
+   :caption: Emulator
    usage
    api
    
+.. toctree::
+   :maxdepth: 2
+   :caption: Data
+   cosmologies
+   visualization
 
 Acknowledgement
 ---------------
