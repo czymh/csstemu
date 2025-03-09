@@ -8,14 +8,16 @@
 import os
 import sys
 import sphinx_rtd_theme
+from importlib.metadata import version
 sys.path.insert(0, os.path.abspath('../../'))
 
 project = 'CSST Emulator'
 copyright = '2024, Zhao Chen' #(陈钊)
 author = 'Zhao Chen'
 
-release = '0.1'
-version = '0.1.0'
+release = version('CEmulator')
+version = release
+# version = '.'.join(release.split('.')[:2]) # The short X.Y version
 
 # -- General configuration
 
