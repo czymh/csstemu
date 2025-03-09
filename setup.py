@@ -1,4 +1,15 @@
 from setuptools import setup
+import os
+import re
+
+def get_version():
+    init_path = os.path.join(os.path.dirname(__file__), "CEmulator/__init__.py")
+    with open(init_path, 'r') as f:
+        content = f.read()
+        version_match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", content, re.M)
+        if version_match:
+            return version_match.group(1)
+    raise RuntimeError("Unable to find version string.")
 
 packages = ['CEmulator',
             'CEmulator/emulator',
@@ -7,7 +18,7 @@ packages = ['CEmulator',
 
 setup(
     name='CEmulator',
-    version='0.1.0',
+    version=get_version(),
     author='Zhao Chen',
     author_email='chyiru@sjtu.edu.cn',
     description='A python package for CSST cosmological emulator, which can predict various cosmological statistics within miliseconds.',
@@ -22,7 +33,6 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    package_dir={'euclidemu2': 'CEmulator'},
     package_data={'CEmulator': ['data/*']},
     include_package_data=True,
 )

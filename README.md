@@ -3,7 +3,7 @@
 A python package for CSST cosmological emulator.
 This package is only dependent on `numpy`, `scipy` packages.
 All the gaussian process trainings have been done in advance.
-The whole package predicts the cosmological statistics [e.g., nonlinear matter power spectrum] with ~ **$\lesssim 15$ millisecond per cosmology**.
+The whole package predicts the cosmological statistics [e.g., nonlinear matter power spectrum] within **$\lesssim 15$ millisecond per cosmology**.
 The details of the training simulation suite **Kun Universe** are available on [readthedoc](https://kunsimulation.readthedocs.io/en/latest/).
 
 The parameter space are shown as followed:
