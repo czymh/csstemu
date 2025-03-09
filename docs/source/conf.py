@@ -8,15 +8,15 @@
 import os
 import sys
 import sphinx_rtd_theme
-from importlib.metadata import version
 sys.path.insert(0, os.path.abspath('../../'))
+from CEmulator import __version__ as version
 
 project = 'CSST Emulator'
 copyright = '2024, Zhao Chen' #(陈钊)
 author = 'Zhao Chen'
 
-release = version('CEmulator')
-version = release
+release = version
+
 # version = '.'.join(release.split('.')[:2]) # The short X.Y version
 
 # -- General configuration
@@ -50,8 +50,8 @@ templates_path = ['_templates']
 
 html_theme = 'sphinx_rtd_theme'
 html_theme_options = {
-    'display_version':     True,
-    'style_nav_header_background': '#2980B9',
+    # 'display_version':     True,
+    # 'style_nav_header_background': '#2980B9',
     'logo_only':           False,
     'version_selector':    True,
     'language_selector':   True,
