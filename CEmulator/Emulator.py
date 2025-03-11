@@ -7,6 +7,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
 from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
+from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
 from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
@@ -14,51 +15,47 @@ from .emulator.Pkhm import PkhmMassBin_gp
 from .hankl import P2xi
 from .utils import *
 
-class CEmulator:
+
+####### base class for the whole emulator
+class CBaseEmulator:
     '''
     The CSST Emulator class for various statistics.
     '''
     param_names  = param_names
     param_limits = param_limits
     zlists       = zlists    
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
         '''
         Initialize the CSST Emulator class.
         
         Args:
             verbose : bool, whether to output the running information
+            neutrino_mass_split : string, 'single' or 'degenerate', the neutrino mass split type.
+            
+        .. note:: 
+        
+            The :py:class:`neutrino_mass_split = 'single'` means the neutrino mass is treated as a single massive component.
+            Our training data is based on this treatment.
+            The :py:class:`neutrino_mass_split = 'degenerate'` means the neutrino mass is treated as three degenerate components.
+            This is achieved by using transformation of linear or HMCODE-2020 power spectrum from :py:class:`Nncdm=1` to :py:class:`Nncdm=3`.
+            The transform spectrum can also be directly obtained from the :py:class:`Tkmm_CEmulator` class.
         
         '''
-        self.verbose = verbose
-        self.Cosmo           = Cosmology(verbose=verbose)
-        self.Bkcb            = Bkcb_gp(verbose=verbose) 
-        self.Bkcb_halofit    = Bkcb_halofit_gp(verbose=verbose) 
-        self.Bkcb_lin2hmcode = Bkcb_lin2hmcode_gp(verbose=verbose)
-        self.Bkcb_hmcode2020 = Bkcb_hmcode2020_gp(verbose=verbose)
-        self.Pkcblin         = PkcbLin_gp(verbose=verbose)
-        self.Pknn_cblin      = Pknn_cbLin_gp(verbose=verbose) 
-        self.Ximm_cb         = Ximm_cb_gp(verbose=verbose)
-        self.XihmMassBin     = XihmMassBin_gp(verbose=verbose) 
-        self.PkhmMassBin     = PkhmMassBin_gp(verbose=verbose)  
-     
-    def __sync_cosmologies(self):
-        '''
-        Sync the cosmologies for all objects with the cosmology class.
-        '''
-        ### normalize the cosmologies with the shape (1, n_params)
-        self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
+        self.verbose             = verbose
+        self.neutrino_mass_split = neutrino_mass_split
+        self.Cosmo               = Cosmology(verbose=verbose)
+        self.Pkcblin             = PkcbLin_gp(verbose=verbose)
+        self.Pknn_cblin          = Pknn_cbLin_gp(verbose=verbose)
         
-        ### pass the cosmologies (normalized) to other class
-        self.Bkcb.ncosmo            = self.ncosmo 
-        self.Bkcb_halofit.ncosmo    = self.ncosmo
-        self.Bkcb_lin2hmcode.ncosmo = self.ncosmo
-        self.Bkcb_hmcode2020.ncosmo = self.ncosmo
-        self.Pkcblin.ncosmo         = self.ncosmo
-        self.Pknn_cblin.ncosmo      = self.ncosmo
-        self.Ximm_cb.ncosmo         = self.ncosmo  
-        self.XihmMassBin.ncosmo     = self.ncosmo
-        self.PkhmMassBin.ncosmo     = self.ncosmo
-     
+        if self.neutrino_mass_split == 'single':
+            if self.verbose: 
+                print('The neutrino mass is treated as a single massive component.')
+        elif self.neutrino_mass_split == 'degenerate':
+            self.Tkcblin         = Tkcblin_gp(verbose=verbose)
+            self.Tkmmlin         = Tkmmlin_gp(verbose=verbose)
+        else:
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
+   
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
                    ns=0.9665, w=-1.0, wa=0.0, 
@@ -104,22 +101,20 @@ class CEmulator:
         elif sigma8 is not None:
             ### convert sigma8 to As
             sigma8_g = 0.0
-            As       = 2.105
+            As1e9    = 2.105
             abserr   = 1e-4
             while np.abs(sigma8_g - sigma8) > abserr:
-                cosmos['A'] = As
-                cosmologies_g = np.zeros((1, n_params))
-                for ind, ikey in enumerate(self.param_names):
-                    cosmologies_g[0,ind] = cosmos[ikey]
+                cosmos['A'] = As1e9
                 #use 'Emulator', 'CLASS' or 'CAMB' to get sigma8
-                self.cosmologies = cosmologies_g
+                self.cosmologies = np.array([[cosmos['Omegab'], cosmos['Omegam'], cosmos['H0'], cosmos['ns'], \
+                                              cosmos['A'], cosmos['w'], cosmos['wa'], cosmos['mnu']]]) 
                 ### set the cosmology class
                 self.Cosmo.set_cosmos(cosmos)
-                self.__sync_cosmologies()
+                self._sync_cosmologies()
                 
                 sigma8_g = self.get_sigma8(type=sigma8type) 
                 # print('Guess sigma8:', sigma8_g)
-                As = As * sigma8*sigma8/sigma8_g/sigma8_g
+                As1e9 = As1e9 * sigma8*sigma8/sigma8_g/sigma8_g
             if self.verbose:
                 print('The As is set to %.6e (sigma8=%.6f) to match the input sigma8=%.6f.'%(cosmos['A']*1e-9, sigma8_g, sigma8)) 
         else:
@@ -133,13 +128,30 @@ class CEmulator:
                 raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
-        ## into the cosmologies array only One cosmology each tim
-        self.cosmologies = np.zeros((1, n_params))
-        for ind, ikey in enumerate(self.param_names):
-            self.cosmologies[0,ind] = cosmos[ikey]
+        ## into the cosmologies array only One cosmology each time
+        self.cosmologies = np.array([[cosmos['Omegab'], cosmos['Omegam'], cosmos['H0'], cosmos['ns'], \
+                                      cosmos['A'], cosmos['w'], cosmos['wa'], cosmos['mnu']]])
         ### sync the cosmologies for all objects
-        self.__sync_cosmologies()
-                                    
+        self._sync_cosmologies()
+
+    def _sync_cosmologies(self):
+        '''
+        Sync the cosmologies for all objects with the cosmology class.
+        '''
+        ### normalize the cosmologies with the shape (1, n_params)
+        self.ncosmo = NormCosmo(self.cosmologies, self.param_names, self.param_limits)
+        ### pass the cosmologies (normalized) to other class
+        self.Pkcblin.ncosmo         = self.ncosmo
+        self.Pknn_cblin.ncosmo      = self.ncosmo
+        
+        if self.neutrino_mass_split == 'single':
+            pass
+        elif self.neutrino_mass_split == 'degenerate':
+            self.Tkcblin.ncosmo     = self.ncosmo
+            self.Tkmmlin.ncosmo     = self.ncosmo
+        else:
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split) 
+                                
     def get_cosmo_class(self, z=None, non_linear=None, kmax=10):
         '''
         Get the CLASS cosmology object.
@@ -156,7 +168,7 @@ class CEmulator:
         if len(z) > 1:
             for i_z in range(len(z) - 1):
                 str_zlists += ", {:.4f}".format(z[i_z+1])
-        cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax)
+        cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax, neutrino_mass_split=self.neutrino_mass_split)
         return cosmo_class
     
     def get_camb_results(self, z=None, non_linear=None, kmax=10):
@@ -171,10 +183,10 @@ class CEmulator:
         # z = np.atleast_1d(z)
         z = check_z(self.zlists, z)
         ## reverse redshift for CAMB
-        camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax)
+        camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax, neutrino_mass_split=self.neutrino_mass_split)
         return camb_results
-    
-    def get_pklin(self, z=None, k=None, Pcb=False, type='Emulator', cosmo_class=None, camb_results=None):
+        
+    def get_pklin(self, z=None, k=None, Pcb=False, type='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
         '''
         Get the linear power spectrum.
         
@@ -188,6 +200,8 @@ class CEmulator:
         Return:
             array-like : linear power spectrum with shape (len(z), len(k)) 
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
         # k = check_k(self.Bkcb.klist, k)
         if   type == 'CLASS':
@@ -218,7 +232,7 @@ class CEmulator:
             pklin = pkfunc.P(z,k)
         elif type == 'Emulator':
             if Pcb:
-                pklin = self.Pkcblin.get_pkcbLin(z, k)
+                pklin = self.Pkcblin.get_pkcbLin(z=z, k=k)
             else:
                 pkcblin = self.Pkcblin.get_pkcbLin(z, k)
                 pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
@@ -226,6 +240,15 @@ class CEmulator:
                 fnu2M   = self.Cosmo.Omeganu / self.Cosmo.OmegaM
                 pklin   = fcb2M*fcb2M*pkcblin + fnu2M*fnu2M*pknnlin \
                         + 2*fcb2M*fnu2M*np.sqrt(pkcblin*pknnlin)
+            if neutrino_mass_split == 'single':
+                pklin = pklin
+            elif neutrino_mass_split == 'degenerate':
+                if Pcb:
+                    pklin = self.Tkcblin.get_Tkcblin(z=z, k=k) * pklin
+                else:
+                    pklin = self.Tkmmlin.get_Tkmmlin(z=z, k=k) * pklin
+            else:
+                raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return pklin
@@ -345,6 +368,89 @@ class CEmulator:
         '''
         return self.get_sigma_cb_z(0, 8.0, type=type, cosmo_class=cosmo_class, camb_results=camb_results)
 
+####### class for transfrom from Nncdm=1 to Nncdm=3
+class Tkmm_CEmulator(CBaseEmulator):
+    '''
+    The matter power spectrum transformation from Nncdm=1 to Nncdm=3 emulator class.
+    '''
+    def __init__(self, verbose=False, neutrino_mass_split='degenerate'):
+        super().__init__(verbose, neutrino_mass_split)
+        self.Tkcbhalofit    = Tkcbhalofit_gp(verbose=verbose)
+        self.Tkmmhalofit    = Tkmmhalofit_gp(verbose=verbose)
+        self.Tkcbhmcode2020 = Tkcbhmcode2020_gp(verbose=verbose)
+        self.Tkmmhmcode2020 = Tkmmhmcode2020_gp(verbose=verbose)
+    
+    def _sync_cosmologies(self):
+        '''
+        Sync the cosmologies for all objects with the cosmology class.
+        '''
+        super()._sync_cosmologies()
+        self.Tkcbhalofit.ncosmo    = self.ncosmo
+        self.Tkmmhalofit.ncosmo    = self.ncosmo
+        self.Tkcbhmcode2020.ncosmo = self.ncosmo
+        self.Tkmmhmcode2020.ncosmo = self.ncosmo
+    
+    def get_Tk(self, z=None, k=None, Pcb=False, Tk_type='linear'):
+        z = check_z(self.zlists,     z) 
+        if Tk_type == 'linear':
+            if Pcb:
+                return self.Tkcblin.get_Tkcblin(z=z, k=k)
+            else:
+                return self.Tkmmlin.get_Tkmmlin(z=z, k=k)
+        elif Tk_type == 'halofit':
+            if Pcb:
+                return self.Tkcbhalofit.get_Tkcbhalofit(z=z, k=k)
+            else:
+                return self.Tkmmhalofit.get_Tkmmhalofit(z=z, k=k)
+        elif Tk_type == 'hmcode2020':
+            if Pcb:
+                return self.Tkcbhmcode2020.get_Tkcbhmcode2020(z=z, k=k)
+            else:
+                return self.Tkmmhmcode2020.get_Tkmmhmcode2020(z=z, k=k)
+        
+####### class for the matter power spectrum emulator
+class Pkmm_CEmulator(CBaseEmulator):
+    '''
+    The matter power spectrum emulator class.
+    '''
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
+        '''
+        Initialize the matter power spectrum emulator class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        '''
+        super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
+        self.Bkcb            = Bkcb_gp(verbose=verbose) 
+        self.Bkcb_halofit    = Bkcb_halofit_gp(verbose=verbose) 
+        self.Bkcb_lin2hmcode = Bkcb_lin2hmcode_gp(verbose=verbose)
+        self.Bkcb_hmcode2020 = Bkcb_hmcode2020_gp(verbose=verbose)
+        if self.neutrino_mass_split == 'single':
+            pass
+        elif self.neutrino_mass_split == 'degenerate':
+            self.Tkcbhmcode2020 = Tkcbhmcode2020_gp(verbose=verbose)
+            self.Tkmmhmcode2020 = Tkmmhmcode2020_gp(verbose=verbose)
+        else:
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
+    
+    def _sync_cosmologies(self):
+        '''
+        Sync the cosmologies for all objects with the cosmology class.
+        ''' 
+        super()._sync_cosmologies()
+        ##### pass the cosmologies (normalized) to other class
+        self.Bkcb.ncosmo            = self.ncosmo
+        self.Bkcb_halofit.ncosmo    = self.ncosmo
+        self.Bkcb_lin2hmcode.ncosmo = self.ncosmo
+        self.Bkcb_hmcode2020.ncosmo = self.ncosmo
+        if self.neutrino_mass_split == 'single':
+            pass
+        elif self.neutrino_mass_split == 'degenerate':
+            self.Tkcbhmcode2020.ncosmo = self.ncosmo
+            self.Tkmmhmcode2020.ncosmo = self.ncosmo
+        else:
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
+        
     def _get_Pcurv(self, k=None):
         As = self.Cosmo.As
         ns = self.Cosmo.ns
@@ -353,9 +459,9 @@ class CEmulator:
         Pcurv = lambda k: 2*np.pi*np.pi*As * (h0*k/kp)**(ns-1)/k/k/k
         return Pcurv(k)
     
-    def get_pkhalofit(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None):
+    def get_pkhalofit(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
         '''
-        Get the halofit power spectrum.
+        Get the halofit power spectrum. [only Nncdm=1]
        
         .. note:: 
             This version can not converge with CLASS in the high redshift (z>2.5)
@@ -372,6 +478,8 @@ class CEmulator:
             array-like: halofit power spectrum with shape (len(z), len(k))
          
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
         if  lintype == 'Emulator':
             if Pcb:
@@ -384,7 +492,7 @@ class CEmulator:
             ## TODO: adjust the maximum k for the interpolation may match the result of CLASS
             ## Notice: adjust the maximum k for the interpolation will affect the result significantly
             kinterp      = np.logspace(-4.99, 1, 1024)
-            pklinintp    = self.get_pklin(z=z, k=kinterp, Pcb=Pcb, type=lintype)
+            pklinintp    = self.get_pklin(z=z, k=kinterp, Pcb=Pcb, type=lintype, neutrino_mass_split=neutrino_mass_split)
             for iz in range(len(z)):
                 OmegaLz = OmegaLzall[iz]
                 OmegaMz = OmegaMzall[iz]
@@ -414,7 +522,7 @@ class CEmulator:
                                           an, bn, cn, gamman, alphan, betan, mun, nun, h0)
         elif lintype == 'CLASS':
             if cosmo_class is None:
-                cosmo_class = self.get_cosmo_class(z, non_linear='halofit')
+                cosmo_class = self.get_cosmo_class(z, non_linear='halofit', neutrino_mass_split=neutrino_mass_split)
             if (Pcb) and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
                 pkfunc = cosmo_class.pk_cb
             else:
@@ -426,7 +534,7 @@ class CEmulator:
                                           for ik in list(k)])
         elif lintype == 'CAMB':
             if camb_results is None:
-                camb_results = self.get_camb_results(z, non_linear='takahashi')
+                camb_results = self.get_camb_results(z, non_linear='takahashi', neutrino_mass_split=neutrino_mass_split)
             if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)): 
                 pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
                                                                     var1='delta_nonu', var2='delta_nonu',
@@ -440,7 +548,7 @@ class CEmulator:
             raise ValueError('Type %s not supported yet.'%type) 
         return pkhalofit
     
-    def get_pkHMCODE2020(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None):
+    def get_pkHMCODE2020(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
         '''
         Get the linear power spectrum from HMCODE2020.
         
@@ -454,13 +562,22 @@ class CEmulator:
         Return:
             array-like : linear power spectrum with shape (len(z), len(k))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
         if  lintype == 'Emulator':
             if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                 Bkcbhmcode = self.Bkcb_lin2hmcode.get_Bk(z, k)
                 ## get the linear power spectrum for cb
-                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
+                ## we only emulate the lin2hmcode for the cb power spectrum with Nncdm=1
+                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
                 pkhmcode = pkcblin * Bkcbhmcode
+                if neutrino_mass_split == "single":
+                    pkhmcode = pkhmcode
+                elif neutrino_mass_split == 'degenerate':
+                    pkhmcode = self.Tkcbhmcode2020.get_Tkcbhmcode2020(z=z, k=k) * pkhmcode
+                else:
+                    raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)                    
             else:
                 raise ValueError('Only support the cb power spectrum [Pcb=True] now.')
             
@@ -468,7 +585,7 @@ class CEmulator:
             raise ValueError('CLASS does not support the HMCODE2020 yet.')
         elif lintype == 'CAMB':
             if camb_results is None:
-                camb_results = self.get_camb_results(z, non_linear='mead2020')
+                camb_results = self.get_camb_results(z, non_linear='mead2020', neutrino_mass_split=neutrino_mass_split)
             if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)): 
                 pkfunc = camb_results.get_matter_power_interpolator(nonlinear=True, 
                                                                     var1='delta_nonu', var2='delta_nonu',
@@ -482,7 +599,7 @@ class CEmulator:
             raise ValueError('Type %s not supported yet.'%type) 
         return pkhmcode 
       
-    def get_pknl(self, z=None, k=None, Pcb=False, lintype='Emulator', nltype='hmcode2020', cosmo_class=None, camb_results=None):
+    def get_pknl(self, z=None, k=None, Pcb=False, lintype='Emulator', nltype='hmcode2020', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
         '''
         Get the nonlinear power spectrum.
         
@@ -504,6 +621,8 @@ class CEmulator:
         Return:
             array-like : nonlinear power spectrum with shape (len(z), len(k))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
         k = check_k(self.Bkcb.klist, k)
         ## get the nonlinear transfer for Pcb
@@ -516,14 +635,22 @@ class CEmulator:
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             if   nltype == 'linear':
                 ## get the linear power spectrum for cb
-                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
+                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
             elif nltype == 'halofit':
                 ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                 ## get the halofit power spectrum for cb
-                pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results)
+                pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
             elif nltype == 'hmcode2020':
-                pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class, camb_results=camb_results)
+                pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
             pknl = pkcblin * Bkpred
+            ####### for the neutrino mass split
+            if neutrino_mass_split == 'single':
+                pknl = pknl
+            elif neutrino_mass_split == 'degenerate':
+                pknl = self.Tkcbhmcode2020.get_Tkcbhmcode2020(z=z, k=k) * pknl
+            else:
+                raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)
+            
         else:
             fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
             fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM    
@@ -531,16 +658,16 @@ class CEmulator:
                 if nltype == 'linear':
                     if (cosmo_class is None):
                         cosmo_class = self.get_cosmo_class(z, non_linear=None)
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class)
+                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
                 elif nltype == 'halofit':
                     if (cosmo_class is None):
                         cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
-                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class)
+                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
                     if (cosmo_class is None):
                         cosmo_class = self.get_cosmo_class(z, non_linear='mead2020')
-                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class)
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
                 pknl   = np.zeros_like(pkcblin)
                 Pcurv  = self._get_Pcurv(k)
                 pkcbnl = pkcblin * Bkpred
@@ -561,16 +688,16 @@ class CEmulator:
                 if nltype == 'linear':
                     if (camb_results is None):
                         camb_results = self.get_camb_results(z, non_linear=None)
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results)
+                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'halofit':
                     if (camb_results is None):
                         cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
-                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results)
+                    pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
                     if (camb_results is None):
                         camb_results = self.get_camb_results(z, non_linear='mead2020')
-                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, camb_results=camb_results)
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, camb_results=camb_results, neutrino_mass_split='single')
                 pkcbnl = pkcblin * Bkpred
                 if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                     pkfunc    = camb_results.get_matter_power_interpolator(nonlinear=False, 
@@ -580,11 +707,11 @@ class CEmulator:
                     pknl      = fcb2M*fcb2M*pkcbnl + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl*pknunulin) 
             elif lintype == 'Emulator':
                 if nltype == 'linear':
-                    pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype)
+                    pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, neutrino_mass_split='single')
                 elif nltype == 'halofit':
-                    pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype)
+                    pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
-                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype)
+                    pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
                 pkcbnl = pkcblin * Bkpred
                 if not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                     pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
@@ -594,11 +721,41 @@ class CEmulator:
                 else:
                     raise ValueError('This should not happen!')
             else:
-                raise ValueError('Type %s not supported yet.'%type)                         
+                raise ValueError('Type %s not supported yet.'%type) 
+            ######## for the neutrino mass split
+            if neutrino_mass_split == 'single':
+                pknl = pknl
+            elif neutrino_mass_split == 'degenerate':
+                pknl = self.Tkmmhmcode2020.get_Tkmmhmcode2020(z=z, k=k) * pknl
+            else:
+                raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)                        
         return pknl
+
+####### class for the matter correlation function emulator
+class Ximm_CEmulator(CBaseEmulator):
+    '''
+    The matter correlation function emulator class.
+    '''
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
+        '''
+        Initialize the matter correlation function emulator class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        '''
+        super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
+        self.Ximm_cb = Ximm_cb_gp(verbose=verbose)
+        self.pkemu   = Pkmm_CEmulator(verbose=verbose)
     
-    ######## Matter-matter Correlation function ########
-    def get_ximmhalofit(self, z=None, r=None, Pcb=False):
+    def _sync_cosmologies(self):
+        super()._sync_cosmologies()
+        self.Ximm_cb.ncosmo    = self.ncosmo
+        self.pkemu.ncosmo      = self.ncosmo
+        self.pkemu.cosmologies = self.cosmologies
+        self.pkemu.Cosmo       = self.Cosmo
+        self.pkemu._sync_cosmologies()
+    
+    def get_ximmhalofit(self, z=None, r=None, Pcb=False, neutrino_mass_split=None):
         '''
         Get the matter [cb] correlation function by combining the halofit power spectrum and FFTLog.
         
@@ -609,10 +766,12 @@ class CEmulator:
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists, z)
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
-            k0 = np.logspace(-4.99, 2, 512)
-            p0 = self.get_pkhalofit(z, k0, Pcb=True, lintype='Emulator')
+            k0 = np.logspace(-4.99, 1.99, 512)
+            p0 = self.pkemu.get_pkhalofit(z, k0, Pcb=True, lintype='Emulator', neutrino_mass_split=neutrino_mass_split)
             kfft = np.logspace(-5, 2, 1024)
             pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
                                 kind='slinear', fill_value='extrapolate')(np.log10(kfft))
@@ -624,7 +783,7 @@ class CEmulator:
             raise ValueError('This is coming soon ~~ :)')
         return ximmhalofit
     
-    def _get_ximmnl_from_pknl(self, z=None, r=None, Pcb=False):
+    def _get_ximmnl_from_pknl(self, z=None, r=None, Pcb=False, neutrino_mass_split=None):
         '''
         Get the matter-matter correlation function by combining the pknl and FFTLog.
         
@@ -635,10 +794,12 @@ class CEmulator:
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists, z)
         r = np.atleast_1d(r)
         k0 = np.logspace(-2.2, 1, 512)
-        p0 = self.get_pknl(z, k0, Pcb=Pcb, lintype='Emulator', nltype='halofit')
+        p0 = self.pkemu.get_pknl(z, k0, Pcb=Pcb, lintype='Emulator', nltype='hmcode2020', neutrino_mass_split=neutrino_mass_split)
         kfft = np.logspace(-5, 2, 1024)
         pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
                             kind='slinear', fill_value='extrapolate')(np.log10(kfft))
@@ -648,7 +809,7 @@ class CEmulator:
             ximmnl[iz] = ius(r0, xi0.real)(r)
         return ximmnl
         
-    def get_ximmnl(self, z=None, r=None, Pcb=False):
+    def get_ximmnl(self, z=None, r=None, Pcb=False, neutrino_mass_split=None):
         '''
         Get the matter-matter correlation function.
         
@@ -659,22 +820,46 @@ class CEmulator:
         Return:
             array-like : matter-matter correlation function with shape (len(z), len(r))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
+        if neutrino_mass_split == 'degenerate':
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)
         z = check_z(self.zlists, z)
         r = np.atleast_1d(r)
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
-            ximmhalofit = self.get_ximmhalofit(z=z, r=r, Pcb=Pcb)
+            ximmhalofit = self.get_ximmhalofit(z=z, r=r, Pcb=Pcb, neutrino_mass_split='single')
             ximm_dire = ximmhalofit * self.Ximm_cb.get_Br(z=z, r=r)
-            ximm_tree = self._get_ximmnl_from_pknl(z=z, r=r, Pcb=Pcb)
+            ximm_tree = self._get_ximmnl_from_pknl(z=z, r=r, Pcb=Pcb, neutrino_mass_split='single')
             rswitch = 40.0
             ximm_comb = np.zeros_like(ximm_dire)
             for iz in range(ximm_dire.shape[0]):
                 ximm_comb[iz] = ximm_dire[iz] * np.exp(-(r/rswitch)**4) \
                               + ximm_tree[iz] * (1 - np.exp(-(r/rswitch)**4))
         else:
-            raise ValueError('This is coming soon ~~ :)')
+            raise ValueError('Please set Pcb=True. The emulator for ximm[Pcb=False] is coming soon ~~ :)')
         return ximm_comb  
+
+####### class for the halo-matter correlation function with specified Mass Bin emulator
+class XihmMassBin_CEmulator(CBaseEmulator):
+    '''
+    The halo-matter correlation function [for specified mass bin] emulator class.
+    '''
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
+        '''
+        Initialize the halo-matter correlation function [for specified mass bin] emulator class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        '''
+        super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
+        self.XihmMassBin = XihmMassBin_gp(verbose=verbose)
+        self.PkhmMassBin = PkhmMassBin_gp(verbose=verbose)
+        
+    def _sync_cosmologies(self):
+        super()._sync_cosmologies()
+        self.XihmMassBin.ncosmo    = self.ncosmo
+        self.PkhmMassBin.ncosmo    = self.ncosmo
     
-    ######## Halo-matter cross correlation function ########
     def _get_bkhmMassBin(self, z=None, k=None):
         '''
         Get the ratio between halo-matter power spectrum and cb Lin Pk.
@@ -685,7 +870,7 @@ class CEmulator:
         ind = kinterp<=kcut
         kinterp = kinterp[ind]
         pinterp = self.PkhmMassBin.get_pkhmMassBin(z, kinterp)
-        linterp = self.get_pklin(z, kinterp, Pcb=True, type='Emulator')
+        linterp = self.get_pklin(z, kinterp, Pcb=True, type='Emulator', neutrino_mass_split='single')
         bkout = np.zeros((pinterp.shape[0], pinterp.shape[1], len(k)))
         for i1 in range(pinterp.shape[0]):     # massbin 
             for i2 in range(pinterp.shape[1]): # redshift
@@ -706,7 +891,7 @@ class CEmulator:
         '''
         z = check_z(self.zlists, z)
         ks = np.logspace(-4.99, 1.99, 1024)
-        pkcblin = self.get_pklin(z, ks, type='Emulator', Pcb=True)
+        pkcblin = self.get_pklin(z, ks, type='Emulator', Pcb=True, neutrino_mass_split='single')
         bkhm    = self._get_bkhmMassBin(z, ks)
         ### number density
         xi_trees = np.zeros((bkhm.shape[0], len(z), len(r)))
@@ -716,7 +901,7 @@ class CEmulator:
                 xi_trees[im,iz] = ius(r0,xi0.real)(r)
         return xi_trees
        
-    def get_xihmMassBin(self, z=None, r=None):
+    def get_xihmMassBin(self, z=None, r=None, neutrino_mass_split=None):
         '''
         Get the halo-matter cross correlation function.
         This function only supports the **fixed** mass bin Now.
@@ -728,6 +913,10 @@ class CEmulator:
         Return:
             array-like : halo-matter cross correlation function with shape (len(z), len(r))
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
+        if neutrino_mass_split == 'degenerate':
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)
         xi_dire = self.XihmMassBin.get_xihmMassBin(z, r)
         xi_tree = self._get_xi_tree(z, r)
         rswitch = 40.0 # Mpc/h
@@ -737,7 +926,11 @@ class CEmulator:
                         + xi_tree[im] * (1 - np.exp(-(r/rswitch)**4))
         return xi_comb
 
-    ###### weak lensing part ######
+####### class for the weak lensing statistics emulator
+class WeakLensingBaseEmulator(CBaseEmulator):
+    '''
+    weak lensing part
+    '''    
     def get_lensing_kernel(self, chi=None, dndz=None, Pcb=False):
         '''
         Get the weak lensing kernel.
@@ -803,6 +996,11 @@ class CEmulator:
             Omegam = self.Cosmo.OmegaM
         return 3*H0*H0*Omegam/2/aarr/vc/vc * (chi*(chis - chi)/chis) # 1/Mpc/Mpc
 
+####### class for the convergence power spectrum emulator
+class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
+    '''
+    The convergence power spectrum emulator class.
+    '''
     def get_Limber_Cells(self, ells=None, dndz=None, z_s=None, Pcb=False, non_linear='Emulator', return_shot_noise=None, verbose=False, use_ccl=False):
         '''
         Get the weak lensing power spectrum.
@@ -911,5 +1109,6 @@ class CEmulator:
         self.chi2z = None
         self.z2chi = None
         return cl_kappa
-    
-    
+   
+   
+ 
