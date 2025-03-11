@@ -37,9 +37,9 @@ def check_k(klists, k=None):
     if k is None:
         raise ValueError('Please provide the wavenumber k [h/Mpc].')
     kinput = np.atleast_1d(k)
-    if np.any(kinput < klists[0]):
+    if np.any(kinput < klists[0]-1e-8):
         raise ValueError('kinput min=%.8f is smaller than the lower limit %.8f.'%(np.min(kinput), klists[0]))
-    if np.any(kinput > klists[-1]):
+    if np.any(kinput > klists[-1]+1e-8):
         raise ValueError('kinput max=%.8f is larger than the upper limit %.8f.'%(np.max(kinput), klists[-1]))
     if not np.all(np.diff(kinput) > 0.0):
         raise ValueError('k must be strictly increasing!')
@@ -94,7 +94,7 @@ class MyStandardScaler:
     def inverse_transform(self, Y):
         return np.array([Y[:,ivec] * self.scale_[ivec] + self.mean_[ivec] for ivec in range(Y.shape[1])]).T
 
-def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0):
+def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0, neutrino_mass_split='single'):
     from classy import Class
     param_names  = ['Omegab', 'Omegam', 'H0', \
                    'ns', 'A', 'w', 'wa', 'mnu']
@@ -121,9 +121,19 @@ def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0):
     if para['mnu'] == 0:
         params['N_ur'] = 3.046
     else:
-        params['N_ur'] = 3.046 - 1.0132
-        params['N_ncdm'] = 1
-        params['m_ncdm'] = "{:f}".format(para['mnu'])
+        if neutrino_mass_split == 'single':
+            Nncdm = 1
+            params['N_ur']   = 3.046 - 1.0132 * Nncdm
+            params['N_ncdm'] = Nncdm
+            params['m_ncdm'] = "{:f}".format(para['mnu'])
+        elif neutrino_mass_split == 'degenerate':
+            Nncdm = 3
+            params['N_ur']   = 3.046 - 1.0132 * Nncdm
+            params['N_ncdm'] = Nncdm
+            params['m_ncdm'] = ', '.join(['%.8f'%(para['mnu']/Nncdm) for ii in range(Nncdm)])
+        else:
+            raise ValueError('The neutrino mass split %s is not supported yet.'%neutrino_mass_split) 
+    
     if non_linear is not None:
         params['non linear'] = non_linear
     cosmo_class = Class()
@@ -131,7 +141,7 @@ def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0):
     cosmo_class.compute()
     return cosmo_class
 
-def useCAMB(mypara, zlists, kmax=10.0, non_linear=None):
+def useCAMB(mypara, zlists, kmax=10.0, non_linear=None, neutrino_mass_split='single'):
     import camb
     param_names  = ['Omegab', 'Omegam', 'H0', \
                    'ns', 'A', 'w', 'wa', 'mnu']
@@ -144,8 +154,14 @@ def useCAMB(mypara, zlists, kmax=10.0, non_linear=None):
     if para['mnu'] == 0:
         para['Nncdm'] = 0
     else:
-        ##### Only for One massive neutrino species
-        para['Nncdm'] = 1
+        if neutrino_mass_split == 'single':
+            ##### Only for One massive neutrino species
+            para['Nncdm'] = 1
+        elif neutrino_mass_split == 'degenerate':
+            ##### For three degenerate massive neutrino species
+            para['Nncdm'] = 3
+        else:
+            raise ValueError('The neutrino mass split %s is not supported yet.'%neutrino_mass_split) 
     pars.set_cosmology(H0=h0*100, omch2=omch2, ombh2=ombh2, 
                        num_massive_neutrinos=para["Nncdm"], standard_neutrino_neff=3.046, 
                        mnu=para['mnu'])
