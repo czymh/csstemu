@@ -63,6 +63,7 @@ class Add(KernelOperator):
     '''
     def __call__(self, x1, x2=None):
         return self.k1(x1, x2) + self.k2(x1, x2)
+
 class Mul(KernelOperator):
     '''
     Multiply two kernels.

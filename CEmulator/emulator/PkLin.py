@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from ..GaussianProcess.GaussianProcess import GaussianProcessRegressor, Constant, RBF 
-from ..utils import data_path, zlists, check_k, check_z, MyStandardScaler, cosmoNormLarge
+from ..utils import data_path, zlists, checkdata, check_z, MyStandardScaler, cosmoNormLarge
 
 class PkcbLin_gp:
     zlists = zlists 
@@ -47,7 +47,7 @@ class PkcbLin_gp:
         k : float or array-like, wavenumber [h/Mpc]
         '''
         z = check_z(self.zlists, z)
-        k = check_k(self.klist, k)
+        k = checkdata(self.klist, k, dname='wavenumber')
         if self.NormBeforeGP:
             Normcosmo = self.paramSS.transform(self.ncosmo)
         else:
@@ -115,7 +115,7 @@ class Pknn_cbLin_gp:
         k : float or array-like, wavenumber [h/Mpc]
         '''
         z = check_z(self.zlists, z)
-        k = check_k(self.klist, k)
+        k = checkdata(self.klist, k, dname='wavenumber')
         if self.NormBeforeGP:
             Normcosmo = self.paramSS.transform(self.ncosmo)
         else:

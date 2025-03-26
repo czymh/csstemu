@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from ..GaussianProcess.GaussianProcess import GaussianProcessRegressor, Constant, Matern
-from ..utils import cosmoNorm, data_path, zlists, check_k, check_z
+from ..utils import cosmoNorm, data_path, zlists, checkdata, check_z
 
 class PkhmMassBin_gp:
     zstart = 7
@@ -48,7 +48,7 @@ class PkhmMassBin_gp:
         r : float or array-like, wavenumber [Mpc/h]
         '''
         z = check_z(self.zlists_reduce, z)
-        k = check_k(self.klist,  k)
+        k = checkdata(self.klist,  k, dname='wavenumber')
         
         ## Gaussian Process Regression
         Bkpred = np.zeros((self.nmassbin, self.nvec))

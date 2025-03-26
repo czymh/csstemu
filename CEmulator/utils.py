@@ -33,29 +33,17 @@ def check_z(zlists=zlists,z=None):
         print('Predicting redshifts (sorted):', zinput)
     return zinput
     
-def check_k(klists, k=None):
-    if k is None:
-        raise ValueError('Please provide the wavenumber k [h/Mpc].')
-    kinput = np.atleast_1d(k)
-    if np.any(kinput < klists[0]-1e-8):
-        raise ValueError('kinput min=%.8f is smaller than the lower limit %.8f.'%(np.min(kinput), klists[0]))
-    if np.any(kinput > klists[-1]+1e-8):
-        raise ValueError('kinput max=%.8f is larger than the upper limit %.8f.'%(np.max(kinput), klists[-1]))
-    if not np.all(np.diff(kinput) > 0.0):
-        raise ValueError('k must be strictly increasing!')
-    return kinput
-
-def check_r(rlists, r=None):
-    if r is None:
-        raise ValueError('Please provide the wavenumber r [Mpc/h].')
-    rinput = np.atleast_1d(r)
-    if np.any(rinput < rlists[0]):
-        raise ValueError('r min=%.8f is smaller than the lower limit %.8f.'%(np.min(r), rlists[0]))
-    if np.any(rinput > rlists[-1]):
-        raise ValueError('r max=%.8f is larger than the upper limit %.8f.'%(np.max(r), rlists[-1]))
-    if not np.all(np.diff(rinput) > 0.0):
-        raise ValueError('r must be strictly increasing!')
-    return rinput
+def checkdata(dlists, d=None, dname='wavenumber'):
+    if d is None:
+        raise ValueError('Please provide the %s.'%dname)
+    dinput = np.atleast_1d(d)
+    if np.any(dinput < dlists[0]-1e-8):
+        raise ValueError('The input of [%s] min=%.8f is smaller than the lower limit %.8f.'%(dname, np.min(dinput), dlists[0]))
+    if np.any(dinput > dlists[-1]+1e-8):
+        raise ValueError('The input of [%s] max=%.8f is larger than the upper limit %.8f.'%(dname, np.max(dinput), dlists[-1]))
+    if not np.all(np.diff(dinput) > 0.0):
+        raise ValueError('%s must be strictly increasing!'%dname)
+    return dinput
 
 def NormCosmo(cosmologies, param_names, param_limits):
     '''

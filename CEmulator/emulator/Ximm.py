@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from ..GaussianProcess.GaussianProcess import GaussianProcessRegressor, Constant, Matern
-from ..utils import cosmoNorm, data_path, zlists, check_r, check_z, MyStandardScaler
+from ..utils import cosmoNorm, data_path, zlists, check_z, MyStandardScaler
 
 class Ximm_cb_gp:
     zlists = zlists 

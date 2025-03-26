@@ -1,7 +1,6 @@
 import numpy as np
 import warnings
 import time
-from scipy.integrate import trapz
 from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpolator
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
@@ -9,6 +8,7 @@ from .cosmology import Cosmology
 from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
+from .emulator.HMF import HMFRockstarM200m_gp
 from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
@@ -152,7 +152,7 @@ class CBaseEmulator:
         else:
             raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split) 
                                 
-    def get_cosmo_class(self, z=None, non_linear=None, kmax=10):
+    def get_cosmo_class(self, z=None, non_linear=None, kmax=10, neutrino_mass_split=None):
         '''
         Get the CLASS cosmology object.
         
@@ -161,6 +161,8 @@ class CBaseEmulator:
             non_linear: string, None, 'halofit', 'HMcode' or other camb arguments.
             kmax      : maximum wave number for CLASS calculation.
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         # check_z(z)
         # z = np.atleast_1d(z)
         z = check_z(self.zlists, z)
@@ -168,10 +170,10 @@ class CBaseEmulator:
         if len(z) > 1:
             for i_z in range(len(z) - 1):
                 str_zlists += ", {:.4f}".format(z[i_z+1])
-        cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax, neutrino_mass_split=self.neutrino_mass_split)
+        cosmo_class = useCLASS(self.cosmologies[0], str_zlists, non_linear=non_linear, kmax=kmax, neutrino_mass_split=neutrino_mass_split)
         return cosmo_class
     
-    def get_camb_results(self, z=None, non_linear=None, kmax=10):
+    def get_camb_results(self, z=None, non_linear=None, kmax=10, neutrino_mass_split=None):
         '''
         Get the CAMB results object.
         
@@ -180,10 +182,12 @@ class CBaseEmulator:
             non_linear: string, None, 'takahashi' or other camb arguments.
             kmax      : maximum wave number for CAMB calculation. 
         '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
         # z = np.atleast_1d(z)
         z = check_z(self.zlists, z)
         ## reverse redshift for CAMB
-        camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax, neutrino_mass_split=self.neutrino_mass_split)
+        camb_results = useCAMB(self.cosmologies[0], zlists=z[::-1], non_linear=non_linear, kmax=kmax, neutrino_mass_split=neutrino_mass_split)
         return camb_results
         
     def get_pklin(self, z=None, k=None, Pcb=False, type='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
@@ -203,7 +207,7 @@ class CBaseEmulator:
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
-        # k = check_k(self.Bkcb.klist, k)
+        # k = checkdata(self.Bkcb.klist, k, dname='wavenumber')
         if   type == 'CLASS':
             if cosmo_class is None:
                 kmax = np.max(k)
@@ -268,14 +272,17 @@ class CBaseEmulator:
         '''
         if not isinstance(z, (int, float)):
             raise ValueError('Only support one redshift now.')
-        if not isinstance(R, (int, float)):
-            raise ValueError('Only support one smoothing scale now.')
         # h0 = self.Cosmo.h0 ## if match the sigma8 there is no Cosmo object
         h0 = self.cosmologies[0][2]/100
         if type == 'CLASS':
             if cosmo_class is None:
                 cosmo_class = self.get_cosmo_class(z)
-            sigma = cosmo_class.sigma(R/h0, z)
+            if np.isscalar(R):
+                sigma = cosmo_class.sigma(R/h0, z)
+            else:
+                sigma = np.zeros(len(R))
+                for iR in range(len(R)):
+                    sigma[iR] = cosmo_class.sigma(R[iR]/h0, z)
         elif type == 'CAMB':
             if camb_results is None:
                 camb_results = self.get_camb_results(z)
@@ -290,10 +297,16 @@ class CBaseEmulator:
             sigma = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
                                             var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 10000)
-            W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+            kcalc    = np.logspace(-4.99, 1.99, 1000)
             pcalc    = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
-            sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+            if np.isscalar(R):
+                W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+                sigma    = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+            else:
+                sigma = np.zeros(len(R))
+                for iR in range(len(R)):
+                    W_R      = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
+                    sigma[iR] = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
@@ -313,17 +326,25 @@ class CBaseEmulator:
         '''
         if not isinstance(z, (int, float)):
             raise ValueError('Only support one redshift now.')
-        if not isinstance(R, (int, float)):
-            raise ValueError('Only support one smoothing scale now.')
         # h0 = self.Cosmo.h0
         h0 = self.cosmologies[0][2]/100
         if type == 'CLASS':
             if cosmo_class is None:
                 cosmo_class = self.get_cosmo_class(z)
             if np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
-                sigma_cb = cosmo_class.sigma(R/h0, z)
+                if np.isscalar(R):
+                    sigma_cb = cosmo_class.sigma(R/h0, z)
+                else:
+                    sigma_cb = np.zeros(len(R))
+                    for iR in range(len(R)):
+                        sigma_cb[iR] = cosmo_class.sigma(R[iR]/h0, z)
             else:
-                sigma_cb = cosmo_class.sigma_cb(R/h0, z) 
+                if np.isscalar(R):
+                    sigma_cb = cosmo_class.sigma_cb(R/h0, z)
+                else:
+                    sigma_cb = np.zeros(len(R))
+                    for iR in range(len(R)):
+                        sigma_cb[iR] = cosmo_class.sigma_cb(R[iR]/h0, z) 
         elif type == 'CAMB':
             if camb_results is None:
                 camb_results = self.get_camb_results(z)
@@ -338,10 +359,16 @@ class CBaseEmulator:
             sigma_cb = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
                                                var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 10000)
-            W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+            kcalc    = np.logspace(-4.99, 1.99, 1000)
             pcalc    = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
-            sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+            if np.isscalar(R):
+                W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
+                sigma_cb = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+            else:
+                sigma_cb = np.zeros(len(R))
+                for iR in range(len(R)):
+                    W_R          = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
+                    sigma_cb[iR] = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
@@ -624,7 +651,7 @@ class Pkmm_CEmulator(CBaseEmulator):
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z)
-        k = check_k(self.Bkcb.klist, k)
+        k = checkdata(self.Bkcb.klist, k, dname='wavenumber')
         ## get the nonlinear transfer for Pcb
         if   nltype == 'linear':
             Bkpred = self.Bkcb.get_Bk(z, k)
@@ -926,12 +953,151 @@ class XihmMassBin_CEmulator(CBaseEmulator):
                         + xi_tree[im] * (1 - np.exp(-(r/rswitch)**4))
         return xi_comb
 
+####### class for the halo mass function emulator
+class HMF_CEmulator(CBaseEmulator):
+    '''
+    The halo mass function emulator class.
+    '''
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
+        '''
+        Initialize the halo mass function emulator class.
+        
+        Args:
+            verbose : bool, whether to output the running information
+        '''
+        super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
+        self.HMFRockstarM200m = HMFRockstarM200m_gp(verbose=verbose)
+    
+    def _sync_cosmologies(self):
+        super()._sync_cosmologies()
+        self.HMFRockstarM200m.ncosmo = self.ncosmo
+    
+    def _2d_interp(self, ypred, diff=False):
+        '''
+        2D interpolation for the cumlative halo mass function.
+        '''
+        mhmin_ind = self.HMFRockstarM200m.mhmin_ind
+        mhmax_ind = self.HMFRockstarM200m.mhmax_ind
+        m_edges   = self.HMFRockstarM200m.m_edges
+        mcen      = 10**((np.log10(m_edges[1:]) + np.log10(m_edges[:-1]))/2)
+        dlnM      = np.log(m_edges[1]) - np.log(m_edges[0])
+        ypred_ = np.zeros((len(self.zlists), len(m_edges[:-1])))
+        for iz in range(len(self.zlists)):
+            icol_sta = 0 if iz == 0 else np.sum(mhmax_ind[:iz]-mhmin_ind[:iz])
+            icol_end = icol_sta + mhmax_ind[iz]-mhmin_ind[iz]
+            xplt     = np.log10(m_edges[mhmin_ind[iz]:mhmax_ind[iz]])
+            yplt     = ypred[icol_sta:icol_end]
+            yind     = yplt > 0
+            ypred_[iz,:] = 10**interp1d(xplt[yind], np.log10(yplt[yind]), 
+                                        kind='linear', fill_value='extrapolate')(np.log10(m_edges[:-1]))
+        t08base = self.get_dndlnM_Tinker08(z=self.zlists, M=mcen)
+        t08base = np.cumsum(t08base[:,::-1] * dlnM * 1e9, axis=1)[:,::-1]
+        ypred_  = ypred_[::-1,:] * t08base[::-1,:] # invert the redshift
+        self.addnum = 0
+        ### z space use cubic spline while M space use cubic interpolation
+        if diff:
+            ypred_ = np.diff(ypred_[:, ::-1], axis=1, prepend=np.zeros((len(zlists),1)))[:, ::-1] / dlnM
+            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen), \
+                                                         np.log10(ypred_+self.addnum), kx=3, ky=3)(z, np.log10(M))
+        else:
+            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges[:-1]), \
+                                                         np.log10(ypred_+self.addnum), kx=3, ky=3)(z, np.log10(M))
+        return spline
+    
+    def get_dndlnM_Tinker08(self, z=None, M=None):
+        z  = np.atleast_1d(z)
+        A0 = 0.186; a0 = 1.47; b0 = 2.57; c0 = 1.19
+        Delta = 200
+        alpha = 10**( -(0.75/np.log10(Delta/75))**1.2 )
+        A = A0*(1+z)**(-0.14); a = a0*(1+z)**(-0.06)
+        b = b0*(1+z)**(-alpha); c = c0
+        dlnM    = 0.01
+        Omegacb = self.Cosmo.Omegam
+        rho_cb  = Omegacb*2.7754 * 1e11 ## h^{2}M_{sun}Mpc^{-3}
+        M2R     = lambda M: (3*M/4/np.pi/rho_cb)**(1/3)  # Mpc/h
+        out = np.zeros((len(z), len(M)))
+        for zind, iz in enumerate(z):
+            sigma_p = self.get_sigma_cb_z(z=iz, R=M2R(M*np.exp( dlnM/2)), type='Emulator')
+            sigma_m = self.get_sigma_cb_z(z=iz, R=M2R(M*np.exp(-dlnM/2)), type='Emulator')
+            sigma_c = self.get_sigma_cb_z(z=iz, R=M2R(M)                , type='Emulator')
+            dlns    = np.log(sigma_p**(-1)) - np.log(sigma_m**(-1))
+            fsigma  = A[zind]*((sigma_c/b[zind])**(-a[zind]) + 1) * np.exp(-c/sigma_c/sigma_c)
+            out[zind] = fsigma * rho_cb/M/dlnM*dlns
+        return out
+    
+    def get_Nhalo(self, z=None, M=None, V=1, massdef='RockstarM200m'):
+        '''
+        Get the number of haloes whose mass is not smaller than M. [ $N(\geq M)$ ]
+        
+        Args:
+            z : float or array-like, redshift
+            M : float or array-like, halo mass [Msun/h]
+            V : float, volume [Mpc/h]^3
+        Return:
+            array-like : halo mass function with shape (len(z), len(m))
+        '''
+        z = check_z(self.zlists, z)
+        M = np.atleast_1d(M)
+        if massdef == 'RockstarM200m':
+            ypred_ = self.HMFRockstarM200m.get_data()
+        else:
+            raise ValueError('The massdef = %s is not supported yet.'%massdef)
+        cumhmf = self._2d_interp(ypred_)(z=z, M=M) - self.addnum
+        return cumhmf * V * 1e-9
+
+    def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
+        '''
+        Get the number density of haloes in the mass bin [ $dn/d\ln M$ ] with unit of [Mpc/h]^-3.
+        
+        Args:
+            z : float or array-like, redshift
+            M : float or array-like, halo mass [Msun/h]
+        Return:
+            array-like : halo mass function with shape (len(z), len(M))
+        '''
+        z = check_z(self.zlists, z)
+        M = np.atleast_1d(M)
+        if massdef == 'RockstarM200m':
+            ypred_ = self.HMFRockstarM200m.get_data() 
+        else:
+            raise ValueError('The massdef = %s is not supported yet.'%massdef) 
+        dndlnM = self._2d_interp(ypred_, diff=True)(z=z, M=M) - self.addnum
+        return dndlnM * 1e-9
+
+
 ####### class for the weak lensing statistics emulator
 class WeakLensingBaseEmulator(CBaseEmulator):
     '''
     weak lensing part
-    '''    
-    def get_lensing_kernel(self, chi=None, dndz=None, Pcb=False):
+    '''
+
+    def _get_distance_interp(self, use_ccl=False):
+        t0 = time.time()
+        zmax = 3.1
+        if use_ccl:
+            import pyccl
+            Ob = self.Cosmo.Omegab; Oc  = self.Cosmo.Omegac
+            h0 = self.Cosmo.h0;     As  = self.Cosmo.As
+            ns = self.Cosmo.ns;     mnu = self.Cosmo.mnu
+            w0 = self.Cosmo.w0;     wa  = self.Cosmo.wa
+            cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
+                                                  transfer_function='boltzmann_camb', mass_split='single')
+            func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
+            self.zinterp   = np.linspace(0, zmax, 1000)
+        else:
+            func = self.Cosmo.comoving_distance
+            self.zinterp   = np.linspace(0, zmax, 1000)
+        self.chiinterp = func(self.zinterp)
+        self.chi2z   = interp1d(self.chiinterp, self.zinterp, 
+                                kind='linear') # comoving distance [Mpc] to redshift 
+        self.z2chi   = interp1d(self.zinterp, self.chiinterp, 
+                                kind='linear') # redshift to comoving distance [Mpc]
+        t1 = time.time()
+        if self.verbose:
+            print('Time for perparing the comoving distance to z function: %.2f seconds'%(t1-t0))
+        return self.chi2z, self.z2chi
+    
+    def get_lensing_kernel(self, chi=None, dndz=None, Pcb=False, use_ccl=False):
         '''
         Get the weak lensing kernel.
         
@@ -945,36 +1111,40 @@ class WeakLensingBaseEmulator(CBaseEmulator):
         '''
         vc  = self.Cosmo.vel_light * 1e-5 # cm/s -> km/s
         chi = np.atleast_1d(chi)
-        zarr, narr = dndz
+        zarr, narr = np.copy(dndz)
         narr = narr/narr.max()
         dndzfunc = interp1d(zarr, narr, kind='linear', 
                             fill_value=0, bounds_error=False)
+        znew  = np.linspace(np.min(zarr), np.max(zarr), 512+1)
+        dzarr = znew[1:] - znew[:-1]
+        znew  = (znew[1:] + znew[:-1]) / 2
+        nnew  = dndzfunc(znew)
         H0 = self.Cosmo.h0 * 100
         if Pcb:
             Omegam = self.Cosmo.Omegam
         else:
             Omegam = self.Cosmo.OmegaM
         kernel = np.zeros((len(chi)))
+        if not hasattr(self, 'z2chi') or not hasattr(self, 'chi2z'):
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl)
+        elif self.z2chi is None or self.chi2z is None:
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl) 
         z_chi = self.chi2z(chi)
         for ii, ichi in enumerate(chi):
             zi = z_chi[ii]
             ai = 1/(1+zi)
-            zarr  = np.linspace(zi, np.max(zarr), 256+1)
-            narr  = dndzfunc(zarr)
-            dzarr = zarr[1:] - zarr[:-1]
-            znew  = (zarr[1:] + zarr[:-1]) / 2
-            nnew  = (narr[1:] + narr[:-1]) / 2
-            chiz  = self.z2chi(znew)
+            zind  = znew>=zi
+            chiz  = self.z2chi(znew[zind])
             # norm = np.trapz(nnew, znew)
             norm  = np.sum(nnew*dzarr)
             if np.isclose(norm, 0, atol=1e-5):
                 kernel[ii] = 0
             else:
-                warr  = 3*H0*H0*Omegam/2/ai/vc/vc * (ichi*(chiz - ichi)/chiz) * dzarr*nnew # 1/Mpc/Mpc
+                warr  = 3*H0*H0*Omegam/2/ai/vc/vc * (ichi*(chiz - ichi)/chiz) * dzarr[zind]*nnew[zind] # 1/Mpc/Mpc
                 kernel[ii] = np.sum(warr)/norm
         return kernel
 
-    def get_kappa_kernel(self, chi=None, z_s=1100, Pcb=False):
+    def get_kappa_kernel(self, chi=None, z_s=1100, Pcb=False, use_ccl=False):
         '''
         Get the lensing kernel for a specific source redshift.
         
@@ -987,6 +1157,10 @@ class WeakLensingBaseEmulator(CBaseEmulator):
         '''
         vc   = self.Cosmo.vel_light * 1e-5 # cm/s -> km/s
         chi  = np.atleast_1d(chi)
+        if not hasattr(self, 'z2chi') or not hasattr(self, 'chi2z'): 
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl)
+        elif self.z2chi is None or self.chi2z is None:
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl) 
         aarr = 1/(1+self.chi2z(chi)) 
         chis = self.Cosmo.comoving_distance(z_s)
         H0   = self.Cosmo.h0 * 100
@@ -1030,37 +1204,20 @@ class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
             
         nell = len(ells)
         cl_kappa = np.zeros(nell)
-        zall  = np.linspace(0, zmax, 100+1, endpoint=True)
-        t00 = time.time()
-        if use_ccl:
-            import pyccl
-            Ob = self.Cosmo.Omegab; Oc  = self.Cosmo.Omegac
-            h0 = self.Cosmo.h0;     As  = self.Cosmo.As
-            ns = self.Cosmo.ns;     mnu = self.Cosmo.mnu
-            w0 = self.Cosmo.w0;     wa  = self.Cosmo.wa
-            cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
-                                                  transfer_function='boltzmann_camb', mass_split='single')
-            func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
-            zinterp   = np.linspace(0, zmax, 10000)
-        else:
-            func = self.Cosmo.comoving_distance
-            zinterp   = np.linspace(0, zmax, 1000)
-        chiinterp = func(zinterp)
-        self.chi2z   = interp1d(chiinterp, zinterp, 
-                                kind='linear') # comoving distance [Mpc] to redshift 
-        self.z2chi   = interp1d(zinterp, chiinterp, 
-                                kind='linear') # redshift to comoving distance [Mpc]
+        zall  = np.linspace(0, zmax, 100+1, endpoint=True) 
+        if not hasattr(self, 'z2chi') or not hasattr(self, 'chi2z'):
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl)
+        elif self.z2chi is None or self.chi2z is None:
+            self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl) 
         chis  = self.z2chi(zall) 
         dchis = chis[1:] - chis[:-1]
         chis  = (chis[1:] + chis[:-1]) / 2
         zall  = (zall[1:] + zall[:-1]) / 2
         t0 = time.time()
-        if verbose:
-            print('Time for preparing comoving distance interp func:', t0-t00)
         if dndz is not None:
-            Wallchi = self.get_lensing_kernel(chi=chis, dndz=dndz, Pcb=Pcb)
+            Wallchi = self.get_lensing_kernel(chi=chis, dndz=dndz, Pcb=Pcb, use_ccl=use_ccl)
         elif z_s is not None:
-            Wallchi = self.get_kappa_kernel(chi=chis, z_s=z_s, Pcb=Pcb)
+            Wallchi = self.get_kappa_kernel(chi=chis, z_s=z_s, Pcb=Pcb, use_ccl=use_ccl)
         t1 = time.time()
         if verbose:
             print('Time for kernel:', t1-t0)
@@ -1068,22 +1225,22 @@ class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
         if return_shot_noise is None:
             if non_linear == 'Emulator':
                 karr  = np.logspace(-2.2, 1.0, 1000)
-                bkarr = self.get_pknl (z=zall, k=karr, Pcb=Pcb, lintype='Emulator', nltype='halofit') \
-                    / self.get_pklin(z=zall, k=karr, Pcb=Pcb,    type='Emulator')
+                bkarr = self.get_pknl (z=zall, k=karr, Pcb=Pcb, lintype='Emulator') \
+                      / self.get_pklin(z=zall, k=karr, Pcb=Pcb,    type='Emulator')
                 bk2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(bkarr)) 
-                karr2    = np.logspace(-4.99, 2, 1000)
+                karr2    = np.logspace(-4.99, 1, 1000)
                 plarr    = self.get_pklin(z=zall, k=karr2, Pcb=Pcb, type='Emulator')
                 pl2Dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr2)), values=np.log10(plarr))
                 Pk2Dfunc = lambda z, k: (10**pl2Dfunc(list(zip(z, np.log10(k/h0)))))*(10**bk2Dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
 
             elif non_linear == 'halofit':
-                karr  = np.logspace(-4.99, 2, 1000)
+                karr  = np.logspace(-4.99, 1, 1000)
                 pkarr = self.get_pkhalofit(z=zall, k=karr, Pcb=Pcb, lintype='Emulator')
                 pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
                 Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
                 
             elif non_linear == 'linear':
-                karr  = np.logspace(-4.99, 2, 1000)
+                karr  = np.logspace(-4.99, 1, 1000)
                 pkarr = self.get_pklin(z=zall, k=karr, Pcb=Pcb, type='Emulator')
                 pk2dfunc = RegularGridInterpolator(method='linear', bounds_error=False, fill_value=None, points=(zall, np.log10(karr)), values=np.log10(pkarr))
                 Pk2Dfunc = lambda z, k: (10**pk2dfunc(list(zip(z, np.log10(k/h0)))))/h0/h0/h0
@@ -1104,7 +1261,7 @@ class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
         t3 = time.time()
         if verbose:
             print('Time for ells(n=%d) loop:'%nell, t3-t2)
-            print('Total time:', t3-t00)
+            print('Total time:', t3-t0)
         # clear the interpolation
         self.chi2z = None
         self.z2chi = None
