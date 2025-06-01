@@ -6,12 +6,13 @@ from .utils import data_path
 
 class Cosmology:
 
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, neutrino_mass_split='single'):
         '''
         Initialize the CSST cosmology class.
         
         Args:
             verbose : bool, whether to output the running information
+            neutrino_mass_split : string, 'single' or 'degenerate', the neutrino mass split type.
         
         '''
         ## physical constants
@@ -21,6 +22,8 @@ class Cosmology:
         self.h0_units  = 3.2407789e-18; # h/sec
         self.kB        = 8.617333262145e-5   ## boltzman in eV/K
         self.rho_crit  = 2.77536627e11 # h^2 Msun/Mpc^3
+        self.verbose   = verbose
+        self.neutrino_mass_split = neutrino_mass_split
             
     def set_cosmos(self, cosmologies):
         '''
@@ -34,8 +37,14 @@ class Cosmology:
             self.Nur     = 3.046
             self.Nncdm   = 0
         else:
-            self.Nur     = 2.0328
-            self.Nncdm   = 1
+            if self.neutrino_mass_split == 'degenerate':
+                self.Nur     = 0.0064
+                self.Nncdm   = 3
+            elif self.neutrino_mass_split =='single':
+                self.Nur     = 2.0328
+                self.Nncdm   = 1
+            else:
+                raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
         self.h0       = cosmologies['H0'] / 100
         self.Omeganu  = self.mnu/93.14/self.h0/self.h0
         # total matter without massive neutrinos
@@ -156,8 +165,8 @@ class Cosmology:
         Returns:
             array-like : 2D array of shape (len(z)), comoving distance in Mpc
         '''
-        z = np.atleast_1d(z)
-        aarr = 1/(1+z)
+        z       = np.atleast_1d(z)
+        aarr    = 1/(1+z)
         fac     = 1e-5*self.vel_light/self.h0/100
         chi_int = lambda a: 1/self.get_Ez(1/a-1)/a/a
         # a_int   = lambda a: np.linspace(a, 1, 256)
