@@ -10,7 +10,6 @@ class HMFbase_gp:
         self.verbose = verbose
         self.emunamestr    = ''
         self.n_sample      = 129
-        self.nvec          = 5
         self.NormBeforePCA = True
         self.NormBeforeGP  = True
         self._load_data()
@@ -21,24 +20,22 @@ class HMFbase_gp:
             print('Using %d training samples.'%self.n_sample)
         self.X_train = cosmoNorm[:self.n_sample,:]
         ### load karr
-        Nbin = 60
-        self.mstr  = '_Nbin%d'%Nbin
+        Nbin         = 60
+        self.mstr    = '_Nbin%d'%Nbin
         self.m_edges = np.logspace(10, 16, Nbin+1) 
         self.mlow    = self.m_edges[:-1]
         self.mhmin_ind = 10 * np.ones(len(self.zlists), dtype=int)  # M_h > 1e11 Msun/h
-        self.mhmax_ind = np.array([39, 41, 44, 45, 45, 49, 49, 50, 53, 55, 56, 57]) # c0000 M_h max (Not include)
         ### load the PCA transformation matrix
-        _tmp = np.load(data_path + 'pca_mean_components_nvec%d_%s_n%d%s.npy'%(self.nvec, self.emunamestr, self.n_sample, self.mstr))
-        self._PCA_mean       = _tmp[0,:]
-        self._PCA_components = _tmp[1:,:]
+        allsavedata = np.load(data_path + "%s.npz"%self.emunamestr, allow_pickle=True)
+        self._PCA_mean       = allsavedata['pca_data'][0,:]
+        self._PCA_components = allsavedata['pca_data'][1:,:]
         ### Load the Gaussian Process Regression model
         self._GPR = np.zeros(self.nvec, dtype=object)
-        gprinfo    = np.load(data_path + '%s_gpr_kernel_nvec%d_n%d%s.npy'%(self.emunamestr, self.nvec, self.n_sample, self.mstr), allow_pickle=True)
-        pkcoeff    = np.load(data_path + '%s_coeff_nvec%d_n%d%s.npy'%(self.emunamestr, self.nvec, self.n_sample, self.mstr))
+        gprinfo    = allsavedata['gprinfo']
+        pkcoeff    = allsavedata['Bcoeff']
         if self.NormBeforePCA:
-            pcaSS_data = np.load(data_path + 'norm_before_pca_nvec%d_%s_n%d%s.npy'%(self.nvec, self.emunamestr, self.n_sample, self.mstr), allow_pickle=True).item()
-            self.pcaSS_mean  = pcaSS_data['mean']
-            self.pcaSS_scale = pcaSS_data['scale']
+            self.pcaSS_mean  = allsavedata['pcaSS_data'][0,:]
+            self.pcaSS_scale = allsavedata['pcaSS_data'][1,:] 
         if self.NormBeforeGP:
             self.pkcoeffSS = MyStandardScaler()
             self.paramSS   = MyStandardScaler()
@@ -71,21 +68,49 @@ class HMFbase_gp:
         ## PCA inverse transform
         ypred  = ((ypred @ self._PCA_components) + self._PCA_mean)
         if self.NormBeforePCA:
-            ypred = 10**np.array([ypred[ivec] * self.pcaSS_scale[ivec] + self.pcaSS_mean[ivec] for ivec in range(len(self.pcaSS_scale))]).T
+            ypred = ypred * self.pcaSS_scale + self.pcaSS_mean
         return ypred
     
 class HMFRockstarM200m_gp(HMFbase_gp):
     def __init__(self, verbose=False):
-        self.verbose    = verbose
-        self.emunamestr = 'cumhmf_m200m_rockstar'
-        self.n_sample   = 129
-        self.nvec       = 6
+        self.verbose       = verbose
+        self.emunamestr    = 'cumhmf_rockstar_M200m'
+        self.n_sample      = 129
+        self.nvec          = 10
         self.NormBeforePCA = True
         self.NormBeforeGP  = True
+        self.mhmax_ind = np.array([36,38,40,41,43,45,46,48,50,52,53,53]) # mean M_h max
         self._load_data()
         
     def get_data(self):
         return super().get_data()
     
+class HMFFoFM200c_gp(HMFbase_gp):
+    def __init__(self, verbose=False):
+        self.verbose       = verbose
+        self.emunamestr    = 'cumhmf_fof_M200c'
+        self.n_sample      = 129
+        self.nvec          = 10
+        self.NormBeforePCA = True
+        self.NormBeforeGP  = True
+        # self.mhmax_ind = np.array([39,41,43,44,45,48,49,52,53,54,54,54]) # c0000 M_h max
+        self.mhmax_ind = np.array([36,38,40,41,43,44,46,48,49,51,51,51]) # mean M_h max 
+        self._load_data()
+        
+    def get_data(self):
+        return super().get_data()
 
+class HMFRockstarMvir_gp(HMFbase_gp):
+    def __init__(self, verbose=False):
+        self.verbose       = verbose
+        self.emunamestr    = 'cumhmf_rockstar_Mvir'
+        self.n_sample      = 129
+        self.nvec          = 10
+        self.NormBeforePCA = True
+        self.NormBeforeGP  = True
+        self.mhmax_ind = np.array([36,38,40,41,42,44,45,47,49,50,52,52]) # mean M_h max
+        self._load_data()
+        
+    def get_data(self):
+        return super().get_data() 
 

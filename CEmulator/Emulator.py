@@ -1,14 +1,15 @@
 import numpy as np
 import warnings
 import time
-from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpolator
+from scipy.special import gamma
+from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpolator, UnivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
 from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
-from .emulator.HMF import HMFRockstarM200m_gp
+from .emulator.HMF import HMFRockstarM200m_gp, HMFFoFM200c_gp, HMFRockstarMvir_gp
 from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
@@ -43,7 +44,7 @@ class CBaseEmulator:
         '''
         self.verbose             = verbose
         self.neutrino_mass_split = neutrino_mass_split
-        self.Cosmo               = Cosmology(verbose=verbose)
+        self.Cosmo               = Cosmology(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
         self.Pkcblin             = PkcbLin_gp(verbose=verbose)
         self.Pknn_cblin          = Pknn_cbLin_gp(verbose=verbose)
         
@@ -59,7 +60,8 @@ class CBaseEmulator:
     def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
                    H0=67.66, As=None, sigma8=None, 
                    ns=0.9665, w=-1.0, wa=0.0, 
-                   mnu=0.06, sigma8type='Emulator'):
+                   mnu=0.06, sigma8type='Emulator',
+                   checkbound=True):
         '''
         Set the cosmological parameters.
         
@@ -74,6 +76,7 @@ class CBaseEmulator:
             mnu    : float, sum of neutrino masses with unit eV
             sigma8 : float, amplitude of the total matter power spectrum. If both As and sigma8 are provided, the As will be used. You can set As=None to activate sigma8.
             sigma8type: str, 'Emulator', 'CLASS' or 'CAMB', the method to calculate the sigma8.
+            checkbound: bool, whether to check the parameter range.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -87,12 +90,13 @@ class CBaseEmulator:
         cosmos.pop('Omegac')
         n_params = len(self.param_names)
         ## check the parameter range / except As 
-        for ind, ikey in enumerate(self.param_names):
-            if ikey != 'A':
-                if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
-                    raise ValueError(r'Parameter out of range %s = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
-                elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
-                    raise ValueError(r'Parameter out of range %s = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
+        if checkbound:
+            for ind, ikey in enumerate(self.param_names):
+                if ikey != 'A':
+                    if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                        raise ValueError(r'Parameter out of range %s = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                    elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
+                        raise ValueError(r'Parameter out of range %s = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
 
         if As is not None:
             cosmos['A']      = (As*1e9)
@@ -121,11 +125,12 @@ class CBaseEmulator:
             raise ValueError('Both As and sigma8 are None, please provide one of them at least.')
         # Omeganu = cosmos['mnu']/93.14/cosmos['H0']/cosmos['H0'] * 1e4
         ## check the parameter range for As
-        for ikey in ['A']:
-            if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
-                raise ValueError(r'Parameter out of range %ss1e9 = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
-            elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
-                raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
+        if checkbound:
+            for ikey in ['A']:
+                if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                    raise ValueError(r'Parameter out of range %ss1e9 = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
+                    raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
         ## into the cosmologies array only One cosmology each time
@@ -967,64 +972,249 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
         self.HMFRockstarM200m = HMFRockstarM200m_gp(verbose=verbose)
+        self.HMFFoFM200c      = HMFFoFM200c_gp(verbose=verbose)
+        self.HMFRockstarMvir  = HMFRockstarMvir_gp(verbose=verbose)
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
         self.HMFRockstarM200m.ncosmo = self.ncosmo
+        self.HMFFoFM200c.ncosmo      = self.ncosmo
+        self.HMFRockstarMvir.ncosmo  = self.ncosmo
     
-    def _2d_interp(self, ypred, diff=False):
+    def _2d_interp(self, ypred, diff=False, massdef='RockstarM200m'):
         '''
         2D interpolation for the cumlative halo mass function.
         '''
-        mhmin_ind = self.HMFRockstarM200m.mhmin_ind
-        mhmax_ind = self.HMFRockstarM200m.mhmax_ind
-        m_edges   = self.HMFRockstarM200m.m_edges
+        if massdef == 'RockstarM200m':
+            Delta = 200
+            rho_type = 'matter'
+            mhmin_ind = self.HMFRockstarM200m.mhmin_ind
+            mhmax_ind = self.HMFRockstarM200m.mhmax_ind
+            m_edges   = self.HMFRockstarM200m.m_edges   
+        elif massdef == 'FoFM200c':
+            Delta = 200
+            rho_type = 'critical'
+            mhmin_ind = self.HMFFoFM200c.mhmin_ind
+            mhmax_ind = self.HMFFoFM200c.mhmax_ind
+            m_edges   = self.HMFFoFM200c.m_edges
+        elif massdef == 'RockstarMvir':
+            Delta = "vir"
+            rho_type = 'matter'
+            mhmin_ind = self.HMFRockstarMvir.mhmin_ind
+            mhmax_ind = self.HMFRockstarMvir.mhmax_ind
+            m_edges   = self.HMFRockstarMvir.m_edges           
+        else:
+            raise ValueError('Mass definition %s is not supported.'%massdef)
         mcen      = 10**((np.log10(m_edges[1:]) + np.log10(m_edges[:-1]))/2)
         dlnM      = np.log(m_edges[1]) - np.log(m_edges[0])
+        t08base   = self.get_dndlnM_Castro23(z=self.zlists, M=mcen, Pcb=True, revisted=True, massdef=massdef)
+        t08base   = np.cumsum(t08base[:,::-1] * dlnM * 1e9, axis=1)[:,::-1]  
         ypred_ = np.zeros((len(self.zlists), len(m_edges[:-1])))
         for iz in range(len(self.zlists)):
             icol_sta = 0 if iz == 0 else np.sum(mhmax_ind[:iz]-mhmin_ind[:iz])
             icol_end = icol_sta + mhmax_ind[iz]-mhmin_ind[iz]
             xplt     = np.log10(m_edges[mhmin_ind[iz]:mhmax_ind[iz]])
-            yplt     = ypred[icol_sta:icol_end]
+            yplt     = ypred[icol_sta:icol_end] #* t08base[iz, mhmin_ind[iz]:mhmax_ind[iz]]
             yind     = yplt > 0
-            ypred_[iz,:] = 10**interp1d(xplt[yind], np.log10(yplt[yind]), 
-                                        kind='linear', fill_value='extrapolate')(np.log10(m_edges[:-1]))
-        t08base = self.get_dndlnM_Tinker08(z=self.zlists, M=mcen)
-        t08base = np.cumsum(t08base[:,::-1] * dlnM * 1e9, axis=1)[:,::-1]
+            yfunc    = UnivariateSpline(xplt[yind], np.log10(yplt[yind]), k=1, s=0, ext=0)
+            ypred_[iz,:] = 10**yfunc(np.log10(m_edges[:-1]))
+            
+        # ypred_[ypred_<=0] = 1e-32
         ypred_  = ypred_[::-1,:] * t08base[::-1,:] # invert the redshift
-        self.addnum = 0
         ### z space use cubic spline while M space use cubic interpolation
         if diff:
-            ypred_ = np.diff(ypred_[:, ::-1], axis=1, prepend=np.zeros((len(zlists),1)))[:, ::-1] / dlnM
+            dlgM_ = 0.1
+            dlnM_ = 0.1 * np.log(10)
+            ypred_new = np.zeros_like(ypred_)
+            for iz in range(len(self.zlists)):
+                Nfunc = UnivariateSpline(np.log10(m_edges[:-1]), np.log10(ypred_[iz,:]), k=3, s=0, ext=0)
+                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen)-dlgM_/2) - 10**Nfunc(np.log10(mcen)+dlgM_/2)) / dlnM_
+            self.addnum = 1 - np.min(ypred_new)
             spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen), \
-                                                         np.log10(ypred_+self.addnum), kx=3, ky=3)(z, np.log10(M))
+                                                         np.log10(ypred_new+self.addnum), kx=1, ky=1)(z, np.log10(M))
         else:
+            self.addnum = 1 - np.min(ypred_)
             spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges[:-1]), \
-                                                         np.log10(ypred_+self.addnum), kx=3, ky=3)(z, np.log10(M))
+                                                         np.log10(ypred_+self.addnum), kx=1, ky=1)(z, np.log10(M))
         return spline
     
-    def get_dndlnM_Tinker08(self, z=None, M=None):
+    def _get_massdef_Delta(self, z, Pcb=True, Delta=200, rho_type='matter'):
+        if Pcb:
+            Omegam_z = self.Cosmo.get_Omegam
+        else:
+            Omegam_z = self.Cosmo.get_OmegaM
+        if str(Delta) == "vir":
+            x = Omegam_z(z) - 1
+            Delta = 18*np.pi**2 + 82*x - 39*x**2
+            Delta = Delta / Omegam_z(z)
+            return Delta
+        if rho_type == "critical":
+            Delta = Delta / Omegam_z(z)
+        elif rho_type == "matter":
+            Delta = Delta
+        return Delta
+
+    def _get_lagrangian_Radius(self, M=None, Pcb=True):
+        '''
+        Get the Lagrangian radius of the haloes with mass M.
+        Args:
+            M  : float or array-like, halo mass [Msun/h]
+            Pcb: bool, whether to use the total power spectrum (if False) or the cb power spectrum (if True [default])
+        
+        Return:
+            array-like : Lagrangian radius [Mpc/h]
+        '''
+        M = np.atleast_1d(M)
+        if Pcb:
+            rho_m = self.Cosmo.rho_crit * self.Cosmo.Omegam ## h^{2}M_{sun}Mpc^{-3}
+        else:
+            rho_m = self.Cosmo.rho_crit * self.Cosmo.OmegaM ## h^{2}M_{sun}Mpc^{-3}
+        return (3*M/4/np.pi/rho_m)**(1/3)   # Mpc/h
+
+    def _get_delta_c(self, z=None, Pcb=True):
+        '''
+        Get the overdensity parameter delta_c.
+        Args:
+            z  : float or array-like, redshift
+            Pcb: bool, whether to use the total power spectrum (if False) or the cb power spectrum (if True [default])
+        Return:
+            array-like : overdensity parameter delta_c
+        '''
+        z = np.atleast_1d(z)
+        if Pcb:
+            Omega_m_zall = self.Cosmo.get_Omegam(z=z)
+        else:
+            Omega_m_zall = self.Cosmo.get_OmegaM(z=z)
+        return (3/20 * (12*np.pi)**(2/3) * (1 + 0.0123*np.log10(Omega_m_zall)))
+
+    def _get_dlns_dlnR(self, z=None, M=None, dlnR=0.01, Pcb=True):
+        '''
+        Get the dln\sigma/dlnR.
+        Args:
+            z   : float, redshift
+            M   : float or array-like, halo mass [Msun/h]
+            dlnR: float, the step of the Lagrangian radius [Mpc/h]
+            Pcb : bool, whether to use the total power spectrum (if False) or the cb power spectrum (if True [default]) 
+        '''
+        lnR_c  = np.log(self._get_lagrangian_Radius(M=M, Pcb=Pcb))
+        R_m    = np.exp(lnR_c - dlnR/2)
+        R_p    = np.exp(lnR_c + dlnR/2)
+        if Pcb:
+            sigma_m = self.get_sigma_cb_z(R=R_m, z=z, type='Emulator')
+            sigma_p = self.get_sigma_cb_z(R=R_p, z=z, type='Emulator')
+        else:
+            sigma_m = self.get_sigma_z(R=R_m, z=z, type='Emulator')
+            sigma_p = self.get_sigma_z(R=R_p, z=z, type='Emulator') 
+        return np.log(sigma_p/sigma_m)/dlnR
+    
+    def get_dndlnM_Tinker08(self, z=None, M=None, Pcb=True, Delta=200, rho_type='matter'):
+        '''
+        Get the halo mass function with Tinker08 model.
+        
+        Args:
+            z  : float or array-like, redshift
+            M  : float or array-like, halo mass [Msun/h]
+            Pcb: bool, whether to use the total power spectrum (if False) or the cb power spectrum (if True [default]) 
+        '''
+        
         z  = np.atleast_1d(z)
-        A0 = 0.186; a0 = 1.47; b0 = 2.57; c0 = 1.19
-        Delta = 200
-        alpha = 10**( -(0.75/np.log10(Delta/75))**1.2 )
-        A = A0*(1+z)**(-0.14); a = a0*(1+z)**(-0.06)
-        b = b0*(1+z)**(-alpha); c = c0
+        delta = np.array(
+            [200., 300., 400., 600., 800., 1200., 1600., 2400., 3200.])
+        A0arr = np.array(
+            [0.186, 0.200, 0.212, 0.218, 0.248, 0.255, 0.260, 0.260, 0.260])
+        a0arr = np.array(
+            [1.47, 1.52, 1.56, 1.61, 1.87, 2.13, 2.30, 2.53, 2.66])
+        b0arr = np.array(
+            [2.57, 2.25, 2.05, 1.87, 1.59, 1.51, 1.46, 1.44, 1.41])
+        c0arr = np.array(
+            [1.19, 1.27, 1.34, 1.45, 1.58, 1.80, 1.97, 2.24, 2.44]) 
+        ldelta = np.log10(delta)
+        A0func = interp1d(ldelta, A0arr, fill_value="extrapolate") 
+        a0func = interp1d(ldelta, a0arr, fill_value="extrapolate")
+        b0func = interp1d(ldelta, b0arr, fill_value="extrapolate")
+        c0func = interp1d(ldelta, c0arr, fill_value="extrapolate")
+        Delta  = self._get_massdef_Delta(z, Pcb=Pcb, Delta=Delta, rho_type=rho_type)
+        if Pcb:
+            Omegacb   = self.Cosmo.Omegam # better to use the cb value for nuCDM universe
+            sigmafunc = self.get_sigma_cb_z
+        else:
+            Omegacb = self.Cosmo.OmegaM
+            sigmafunc = self.get_sigma_z
+        A0      = A0func(np.log10(Delta))
+        a0      = a0func(np.log10(Delta))
+        b0      = b0func(np.log10(Delta))
+        c0      = c0func(np.log10(Delta))
+        alpha   = 10**( -(0.75/np.log10(Delta/75))**1.2 )
+        A       = A0*(1+z)**(-0.14)
+        a       = a0*(1+z)**(-0.06)
+        b       = b0*(1+z)**(-alpha)
+        c       = c0*np.ones_like(z)
         dlnM    = 0.01
-        Omegacb = self.Cosmo.Omegam
-        rho_cb  = Omegacb*2.7754 * 1e11 ## h^{2}M_{sun}Mpc^{-3}
+        rho_cb  = Omegacb*self.Cosmo.rho_crit ## h^{2}M_{sun}Mpc^{-3}
         M2R     = lambda M: (3*M/4/np.pi/rho_cb)**(1/3)  # Mpc/h
         out = np.zeros((len(z), len(M)))
         for zind, iz in enumerate(z):
-            sigma_p = self.get_sigma_cb_z(z=iz, R=M2R(M*np.exp( dlnM/2)), type='Emulator')
-            sigma_m = self.get_sigma_cb_z(z=iz, R=M2R(M*np.exp(-dlnM/2)), type='Emulator')
-            sigma_c = self.get_sigma_cb_z(z=iz, R=M2R(M)                , type='Emulator')
-            dlns    = np.log(sigma_p**(-1)) - np.log(sigma_m**(-1))
-            fsigma  = A[zind]*((sigma_c/b[zind])**(-a[zind]) + 1) * np.exp(-c/sigma_c/sigma_c)
+            sigma_p   = sigmafunc(z=iz, R=M2R(M*np.exp( dlnM/2)), type='Emulator')
+            sigma_m   = sigmafunc(z=iz, R=M2R(M*np.exp(-dlnM/2)), type='Emulator')
+            sigma_c   = sigmafunc(z=iz, R=M2R(M)                , type='Emulator')
+            dlns      = np.log(sigma_p**(-1)) - np.log(sigma_m**(-1))
+            fsigma    = A[zind]*((sigma_c/b[zind])**(-a[zind]) + 1) * np.exp(-c[zind]/sigma_c/sigma_c)
             out[zind] = fsigma * rho_cb/M/dlnM*dlns
         return out
     
+    def get_dndlnM_Castro23(self, z=None, M=None, Pcb=True, revisted=True, massdef='RockstarMvir'):
+        '''
+        Get the halo mass function with Castro23 model.
+        
+        Args:
+            z      : float or array-like, redshift
+            M      : float or array-like, halo mass [Msun/h]
+            Pcb    : bool, whether to use the total power spectrum (if False[just for test]) or the cb power spectrum (if True [default]) 
+            revisted: bool, whether to use the revised Castro23 model (if True[default]) or the original Castro23 model (if False)
+            massdef : string, the mass definition used in the emulator
+            
+        .. note:: 
+            For the original Castro23 model, the mass definition only supports RockstarM200m.
+            For the revised Castro23 model, the mass definition supports RockstarM200m, FoFM200c, and RockstarMvir.
+            
+        '''
+        z  = np.atleast_1d(z)
+        if revisted:
+            if massdef == 'RockstarM200m':
+                a1,a2,az,p1,p2,q1,q2,qz = np.array([0.77283085,0.3686431,-0.03214047,-0.46080809,-0.53419608,0.37336379,-0.32322067,-0.19204407])
+            elif massdef == 'FoFM200c':
+                a1,a2,az,p1,p2,q1,q2,qz = np.array([0.76595201,0.38539018,-0.14234157,-0.52358138,-0.73425449,0.32078283,-0.40464143,0.1526956])
+            elif massdef == 'RockstarMvir':
+                a1,a2,az,p1,p2,q1,q2,qz = np.array([0.76447491,0.41714731,-0.06177372,-0.46860976,-0.65112204,0.38826178,-0.36955881,-0.0068741])
+            else:
+                raise ValueError('The massdef = %s is not supported yet.'%massdef)
+        else:
+            if massdef == 'RockstarMvir':
+                a1,a2,az,p1,p2,q1,q2,qz = np.array([0.7962, 0.1449, -0.0658, -0.5612, -0.4743, 0.3688, -0.2804, 0.0251])
+            else:
+                raise ValueError('The massdef = %s is not supported yet.'%massdef)
+        if Pcb:
+            Omegamfunc = self.Cosmo.get_Omegam
+            rho_m      = self.Cosmo.rho_crit * self.Cosmo.Omegam ## h^{2}M_{sun}Mpc^{-3}
+        else:
+            Omegamfunc = self.Cosmo.get_OmegaM
+            rho_m      = self.Cosmo.rho_crit * self.Cosmo.OmegaM ## h^{2}M_{sun}Mpc^{-3}
+        dndlnM = np.zeros((len(z), len(M)))
+        for iz in range(len(z)):
+            dlnsdlnR = self._get_dlns_dlnR(z=z[iz], M=M, Pcb=Pcb)
+            sigma    = self.get_sigma_cb_z(R=self._get_lagrangian_Radius(M=M, Pcb=Pcb), z=z[iz])
+            Omegamz  = Omegamfunc(z=z[iz])
+            nu       = self._get_delta_c(z=z[iz], Pcb=Pcb)[0]/sigma
+            aR = a1 + a2*(dlnsdlnR+0.6125)*(dlnsdlnR+0.6125)
+            qR = q1 + q2*(dlnsdlnR+0.5)
+            a  = aR * Omegamz**az
+            q  = qR * Omegamz**qz
+            p  = p1 + p2*(dlnsdlnR+0.5)
+            A  = 1/((2**(-0.5-p+q/2)/np.sqrt(np.pi))*(2**p*gamma(0.5*q)+gamma(-p+0.5*q)))
+            multiplicity = A*np.sqrt(2*a*nu*nu/np.pi)*np.exp(-0.5*a*nu*nu)*(1+1/((a*nu*nu)**p))*(np.sqrt(a)*nu)**(q-1)
+            dndlnM[iz] = multiplicity * rho_m / M * (-1/3 * dlnsdlnR)
+        return dndlnM
+ 
     def get_Nhalo(self, z=None, M=None, V=1, massdef='RockstarM200m'):
         '''
         Get the number of haloes whose mass is not smaller than M. [ $N(\geq M)$ ]
@@ -1040,14 +1230,19 @@ class HMF_CEmulator(CBaseEmulator):
         M = np.atleast_1d(M)
         if massdef == 'RockstarM200m':
             ypred_ = self.HMFRockstarM200m.get_data()
+        elif massdef == 'FoFM200c':
+            ypred_ = self.HMFFoFM200c.get_data()
+        elif massdef == 'RockstarMvir':
+            ypred_ = self.HMFRockstarMvir.get_data()
         else:
             raise ValueError('The massdef = %s is not supported yet.'%massdef)
-        cumhmf = self._2d_interp(ypred_)(z=z, M=M) - self.addnum
+        cumhmf = self._2d_interp(ypred_, massdef=massdef)(z=z, M=M) - self.addnum
         return cumhmf * V * 1e-9
 
-    def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
+    def _get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
         '''
         Get the number density of haloes in the mass bin [ $dn/d\ln M$ ] with unit of [Mpc/h]^-3.
+        [Affected by the binning effect, not recommended to use.]
         
         Args:
             z : float or array-like, redshift
@@ -1058,10 +1253,14 @@ class HMF_CEmulator(CBaseEmulator):
         z = check_z(self.zlists, z)
         M = np.atleast_1d(M)
         if massdef == 'RockstarM200m':
-            ypred_ = self.HMFRockstarM200m.get_data() 
+            ypred_ = self.HMFRockstarM200m.get_data()
+        elif massdef == 'FoFM200c':
+            ypred_ = self.HMFFoFM200c.get_data()
+        elif massdef == 'RockstarMvir':
+            ypred_ = self.HMFRockstarMvir.get_data()
         else:
             raise ValueError('The massdef = %s is not supported yet.'%massdef) 
-        dndlnM = self._2d_interp(ypred_, diff=True)(z=z, M=M) - self.addnum
+        dndlnM = self._2d_interp(ypred_, diff=True, massdef=massdef)(z=z, M=M) - self.addnum
         return dndlnM * 1e-9
 
 
