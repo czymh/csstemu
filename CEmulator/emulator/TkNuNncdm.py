@@ -21,13 +21,13 @@ class Tkbase_gp:
         self.kstr  = '_kmax100'
         self.klist = np.load(data_path + 'karr%s.npy'%self.kstr)
         ### load the PCA transformation matrix
-        _tmp = np.load(data_path + 'pca_mean_components_nvec%d_%s_n%d.npy'%(self.nvec, self.emunamestr, self.n_sample))
-        self._PCA_mean       = _tmp[0,:]
-        self._PCA_components = _tmp[1:,:]
+        allsavedata = np.load(data_path + "%s.npz"%self.emunamestr, allow_pickle=True)
+        self._PCA_mean       = allsavedata["pca_data"][0,:]
+        self._PCA_components = allsavedata["pca_data"][1:,:]
         ### Load the Gaussian Process Regression model
         self._GPR = np.zeros(self.nvec, dtype=object)
-        gprinfo    = np.load(data_path + '%s_gpr_kernel_nvec%d_n%d%s.npy'%(self.emunamestr, self.nvec, self.n_sample, self.kstr), allow_pickle=True)
-        pkcoeff    = np.load(data_path + '%s_coeff_nvec%d_n%d%s.npy'%(self.emunamestr, self.nvec, self.n_sample, self.kstr))
+        gprinfo    = allsavedata["gprinfo"]
+        pkcoeff    = allsavedata["Bcoeff"]
         self.NormBeforeGP = True
         if self.NormBeforeGP:
             self.pkcoeffSS = MyStandardScaler()

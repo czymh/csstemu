@@ -14,9 +14,9 @@ class Ximm_cb_gp:
         self.X_train = cosmoNorm[:n_sample,:]
         self.nvec = 10
         ### load the PCA transformation matrix
-        _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgBximm_cb_n%d_HybridNBin127_rmax50.npy'%(self.nvec, n_sample))
-        self.__PCA_mean = _tmp[0,:]
-        self.__PCA_components = _tmp[1:,:]
+        allsavedata = np.load(data_path + "lgBximm_cb.npz", allow_pickle=True)
+        self._PCA_mean       = allsavedata['pca_data'][0,:]
+        self._PCA_components = allsavedata['pca_data'][1:,:]
         ### load karr
         rbins = np.concatenate([np.logspace(-2, 1, 30+1)[:-1],
                         np.arange(10, 500, 5)])
@@ -25,9 +25,9 @@ class Ximm_cb_gp:
         rind = self.rmiddle <= rcut
         self.rmiddle = self.rmiddle[rind]
         ### Load the Gaussian Process Regression model
-        self.__GPR = np.zeros(self.nvec, dtype=object)
-        gprinfo    = np.load(data_path + 'lgBximm_cb_gpr_kernel_nvec%d_n%d_HybridNBin127_rmax50.npy'%(self.nvec,n_sample), allow_pickle=True)
-        Bkcoeff    = np.load(data_path + 'lgBximm_cb_coeff_nvec%d_n%d_HybridNBin127_rmax50.npy'%(self.nvec,n_sample))
+        self._GPR = np.zeros(self.nvec, dtype=object)
+        gprinfo    = allsavedata['gprinfo']
+        Bkcoeff    = allsavedata['Bcoeff']
         self.NormBeforeGP = True
         if self.NormBeforeGP:
             self.coeffSS = MyStandardScaler()
@@ -40,7 +40,7 @@ class Ximm_cb_gp:
             kivec = k1 * k2
             alpha = 1e-10
             ynorm = True
-            self.__GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
+            self._GPR[ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[:,ivec], 
                                                         kernel=kivec, alpha=alpha, normalize_y=ynorm)
         ### End of __init__
     
@@ -60,11 +60,11 @@ class Ximm_cb_gp:
         ## Gaussian Process Regression
         Brpred = np.zeros((self.nvec))
         for ivec in range(self.nvec):
-            Brpred[ivec] = self.__GPR[ivec].predict(Normcosmo)
+            Brpred[ivec] = self._GPR[ivec].predict(Normcosmo)
         if self.NormBeforeGP:
             Brpred = self.coeffSS.inverse_transform(Brpred.reshape(1,-1))[0]
         ## PCA inverse transform
-        Brpred = 10**((Brpred @ self.__PCA_components) + self.__PCA_mean)
+        Brpred = 10**((Brpred @ self._PCA_components) + self._PCA_mean)
         Brpred = Brpred.reshape(len(self.zlists), len(self.rmiddle))
         Brpred = Brpred[::-1,:]
         Brout  = np.zeros((len(z), len(r)))
