@@ -15,15 +15,15 @@ class PkcbLin_gp:
         self.X_train = cosmoNormLarge[indexs,:]
         self.nvec = 20
         ### load the PCA transformation matrix
-        _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgpkLin_n%d.npy'%(self.nvec, n_sample))
-        self.__PCA_mean       = _tmp[0,:]
-        self.__PCA_components = _tmp[1:,:]
+        allsavedata = np.load(data_path + "lgpkLin.npz", allow_pickle=True)
+        self.__PCA_mean       = allsavedata['pca_data'][0,:]
+        self.__PCA_components = allsavedata['pca_data'][1:,:]
         ### load karr
         self.klist = np.load(data_path + 'karr_kmax100.npy')
         ### Load the Gaussian Process Regression model
         self.__GPR = np.zeros(self.nvec, dtype=object)
-        gprinfo    = np.load(data_path + 'lgpkLin_gpr_kernel_nvec%d_n%d_kmax100.npy'%(self.nvec,n_sample), allow_pickle=True)
-        pkcoeff    = np.load(data_path + 'lgpkLin_coeff_nvec%d_n%d_kmax100.npy'%(self.nvec,n_sample))
+        gprinfo    = allsavedata['gprinfo']
+        pkcoeff    = allsavedata['Bcoeff']
         self.NormBeforeGP = True
         if self.NormBeforeGP:
             self.pkcoeffSS = MyStandardScaler()
@@ -83,15 +83,15 @@ class Pknn_cbLin_gp:
         self.X_train = cosmoNormLarge[indexs,:]
         self.nvec = 10
         ### load the PCA transformation matrix
-        _tmp = np.load(data_path + 'pca_mean_components_nvec%d_lgpkLin_nn_cb_n%d.npy'%(self.nvec, n_sample))
-        self.__PCA_mean       = _tmp[0,:]
-        self.__PCA_components = _tmp[1:,:]
+        allsavedata = np.load(data_path + "lgpkLin_nn_cb.npz", allow_pickle=True)
+        self.__PCA_mean       = allsavedata['pca_data'][0,:]
+        self.__PCA_components = allsavedata['pca_data'][1:,:]
         ### load karr
         self.klist = np.load(data_path + 'karr_kmax100.npy')
         ### Load the Gaussian Process Regression model
         self.__GPR = np.zeros(self.nvec, dtype=object)
-        gprinfo    = np.load(data_path + 'lgpkLin_nn_cb_gpr_kernel_nvec%d_n%d_kmax100.npy'%(self.nvec,n_sample), allow_pickle=True)
-        pkcoeff    = np.load(data_path + 'lgpkLin_nn_cb_coeff_nvec%d_n%d_kmax100.npy'%(self.nvec,n_sample))
+        gprinfo    = allsavedata['gprinfo']
+        pkcoeff    = allsavedata['Bcoeff']
         self.NormBeforeGP = True
         if self.NormBeforeGP:
             self.pkcoeffSS = MyStandardScaler()

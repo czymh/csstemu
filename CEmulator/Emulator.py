@@ -831,10 +831,12 @@ class Ximm_CEmulator(CBaseEmulator):
         z = check_z(self.zlists, z)
         r = np.atleast_1d(r)
         k0 = np.logspace(-2.2, 1, 512)
-        p0 = self.pkemu.get_pknl(z, k0, Pcb=Pcb, lintype='Emulator', nltype='hmcode2020', neutrino_mass_split=neutrino_mass_split)
+        p0 = self.pkemu.get_pknl(z=z, k=k0, Pcb=Pcb, lintype='Emulator', nltype='hmcode2020', neutrino_mass_split=neutrino_mass_split)
+        p1 = self.pkemu.get_pklin(z=z, k=k0, Pcb=Pcb, type='Emulator', neutrino_mass_split=neutrino_mass_split)
         kfft = np.logspace(-5, 2, 1024)
-        pfft = 10**interp1d(np.log10(k0), np.log10(p0), 
-                            kind='slinear', fill_value='extrapolate')(np.log10(kfft))
+        plin = self.pkemu.get_pklin(z=z, k=kfft, Pcb=Pcb, type='Emulator', neutrino_mass_split=neutrino_mass_split)
+        pfft = interp1d(np.log10(k0), p0/p1, 
+                        kind='slinear', fill_value='extrapolate')(np.log10(kfft)) * plin
         ximmnl = np.zeros((len(z), len(r)))
         for iz in range(len(z)):
             r0, xi0 = P2xi(kfft, pfft[iz], 0)
@@ -1239,7 +1241,7 @@ class HMF_CEmulator(CBaseEmulator):
         cumhmf = self._2d_interp(ypred_, massdef=massdef)(z=z, M=M) - self.addnum
         return cumhmf * V * 1e-9
 
-    def _get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
+    def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
         '''
         Get the number density of haloes in the mass bin [ $dn/d\ln M$ ] with unit of [Mpc/h]^-3.
         [Affected by the binning effect, not recommended to use.]

@@ -17,25 +17,25 @@ class PkhmMassBin_gp:
         self.X_train = cosmoNorm[:n_sample,:]
         self.nvec = 5
         ### load the PCA transformation matrix
-        pcafname = data_path + 'pca_mean_components_nvec%d_lgpkhm_n%d_kmax_1.0.npy'%(self.nvec, n_sample)
-        self.__PCA_Data = np.load(pcafname, allow_pickle=True)
+        allsavedata = np.load(data_path + "lgpkhm_Massbin.npz", allow_pickle=True)
+        self._PCA_Data = allsavedata["pca_data"]
         ### load karr
         self.klist = np.load(data_path + 'karr_nb_Nmesh1536_nmerge8.npy')
         kcut = 1.0
         ind = self.klist<=kcut
         self.klist = self.klist[ind]
         ### Load the Gaussian Process Regression model
-        self.__GPR = np.zeros((self.nmassbin, self.nvec), dtype=object)
-        gprinfo    = np.load(data_path + 'lgpkhm_gpr_kernel_nvec%d_n%d_kmax_1.0.npy'%(self.nvec,n_sample), allow_pickle=True)
-        Bkcoeff    = np.load(data_path + 'lgpkhm_coeff_nvec%d_n%d_kmax_1.0.npy'%(self.nvec,n_sample), allow_pickle=True)
+        self._GPR = np.zeros((self.nmassbin, self.nvec), dtype=object)
+        gprinfo    = allsavedata["gprinfo"]
+        Bkcoeff    = allsavedata["Bcoeff"]
         for im in range(self.nmassbin):
             for ivec in range(self.nvec):
                 k1    = Constant(gprinfo[im][ivec]['k1__constant_value'])
-                k2    = Matern(gprinfo[im][ivec]['k2__length_scale'])
+                k2    = Matern(gprinfo[im][ivec]['k2__length_scale'], nu=gprinfo[im][ivec]['k2__nu'])
                 kivec = k1 * k2
                 alpha = 1e-10
                 ynorm = True
-                self.__GPR[im, ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[im][:,ivec], 
+                self._GPR[im, ivec] = GaussianProcessRegressor(self.X_train, Bkcoeff[im][:,ivec], 
                                                                 kernel=kivec, alpha=alpha, 
                                                                 normalize_y=ynorm)
         ### End of __init__
@@ -55,10 +55,10 @@ class PkhmMassBin_gp:
         Bkout0 = np.zeros((self.nmassbin, len(self.zlists_reduce), len(self.klist)))
         for im in range(self.nmassbin):
             for ivec in range(self.nvec):
-                Bkpred[im,ivec] = self.__GPR[im,ivec].predict(self.ncosmo)[0]
+                Bkpred[im,ivec] = self._GPR[im,ivec].predict(self.ncosmo)[0]
             ## PCA inverse transform
-            Bkout0[im,:,:] = ((Bkpred[im,:] @ self.__PCA_Data[im][1:]) 
-                           + self.__PCA_Data[im][0]).reshape(len(self.zlists_reduce), len(self.klist))
+            Bkout0[im,:,:] = ((Bkpred[im,:] @ self._PCA_Data[im][1:]) 
+                           + self._PCA_Data[im][0]).reshape(len(self.zlists_reduce), len(self.klist))
         Bkout0 = 10**Bkout0[:,::-1,:]  ## reverse the redshift axis
         Bkout = np.zeros((self.nmassbin, len(z), len(k)))
         ### z space use cubic spline while k space use linear interpolation
