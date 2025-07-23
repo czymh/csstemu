@@ -57,6 +57,7 @@ Contents
    install 
    pklin
    pkmm
+   hmf
    ximm
    xihm
    api
