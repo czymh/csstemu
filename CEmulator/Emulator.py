@@ -1033,8 +1033,8 @@ class HMF_CEmulator(CBaseEmulator):
             addnum = 1 - np.min(ypred_)
             ypred_new = np.zeros_like(ypred_)
             for iz in range(len(self.zlists)):
-                Nfunc = UnivariateSpline(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+self.addnum), k=3, s=0, ext=0)
-                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_/2)-addnum) / dlnM_
+                Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+addnum), kind='cubic', fill_value='extrapolate')
+                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_/2)+addnum) / dlnM_
             self.addnum = 1 - np.min(ypred_new)
             spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
                                                          np.log10(ypred_new+self.addnum), kx=1, ky=1)(z, np.log10(M))
