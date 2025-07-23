@@ -1009,34 +1009,38 @@ class HMF_CEmulator(CBaseEmulator):
             raise ValueError('Mass definition %s is not supported.'%massdef)
         mcen      = 10**((np.log10(m_edges[1:]) + np.log10(m_edges[:-1]))/2)
         dlnM      = np.log(m_edges[1]) - np.log(m_edges[0])
-        t08base   = self.get_dndlnM_Castro23(z=self.zlists, M=mcen, Pcb=True, revisted=True, massdef=massdef)
+        m_edges_l = np.logspace(10, 17, 70+1)
+        mcen_l    = 10**((np.log10(m_edges_l[1:]) + np.log10(m_edges_l[:-1]))/2)
+        t08base   = self.get_dndlnM_Castro23(z=self.zlists, M=mcen_l, Pcb=True, revisted=True, massdef=massdef)
         t08base   = np.cumsum(t08base[:,::-1] * dlnM * 1e9, axis=1)[:,::-1]  
-        ypred_ = np.zeros((len(self.zlists), len(m_edges[:-1])))
+        ypred_ = np.zeros((len(self.zlists), len(mcen_l)))
         for iz in range(len(self.zlists)):
             icol_sta = 0 if iz == 0 else np.sum(mhmax_ind[:iz]-mhmin_ind[:iz])
             icol_end = icol_sta + mhmax_ind[iz]-mhmin_ind[iz]
             xplt     = np.log10(m_edges[mhmin_ind[iz]:mhmax_ind[iz]])
-            yplt     = ypred[icol_sta:icol_end] #* t08base[iz, mhmin_ind[iz]:mhmax_ind[iz]]
+            yplt     = ypred[icol_sta:icol_end]# * t08base[iz, mhmin_ind[iz]:mhmax_ind[iz]]
             yind     = yplt > 0
             yfunc    = UnivariateSpline(xplt[yind], np.log10(yplt[yind]), k=1, s=0, ext=0)
-            ypred_[iz,:] = 10**yfunc(np.log10(m_edges[:-1]))
+            #yfunc    = interp1d(xplt[yind], np.log10(yplt[yind]), kind='cubic', fill_value='extrapolate')
+            ypred_[iz,:] = 10**yfunc(np.log10(m_edges_l[:-1]))
             
         # ypred_[ypred_<=0] = 1e-32
         ypred_  = ypred_[::-1,:] * t08base[::-1,:] # invert the redshift
         ### z space use cubic spline while M space use cubic interpolation
         if diff:
             dlgM_ = 0.1
-            dlnM_ = 0.1 * np.log(10)
+            dlnM_ = dlgM_ * np.log(10)
+            addnum = 1 - np.min(ypred_)
             ypred_new = np.zeros_like(ypred_)
             for iz in range(len(self.zlists)):
-                Nfunc = UnivariateSpline(np.log10(m_edges[:-1]), np.log10(ypred_[iz,:]), k=3, s=0, ext=0)
-                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen)-dlgM_/2) - 10**Nfunc(np.log10(mcen)+dlgM_/2)) / dlnM_
+                Nfunc = UnivariateSpline(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+self.addnum), k=3, s=0, ext=0)
+                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_/2)-addnum) / dlnM_
             self.addnum = 1 - np.min(ypred_new)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen), \
+            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
                                                          np.log10(ypred_new+self.addnum), kx=1, ky=1)(z, np.log10(M))
         else:
             self.addnum = 1 - np.min(ypred_)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges[:-1]), \
+            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
                                                          np.log10(ypred_+self.addnum), kx=1, ky=1)(z, np.log10(M))
         return spline
     
