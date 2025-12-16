@@ -1,6 +1,5 @@
 import numpy as np
-from scipy.integrate import quad, simps
-from scipy.interpolate import interp1d
+from scipy.integrate import quad
 from scipy.special import expit
 from .utils import data_path
 

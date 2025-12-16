@@ -114,3 +114,17 @@ class HMFRockstarMvir_gp(HMFbase_gp):
     def get_data(self):
         return super().get_data() 
 
+class HMFRockstarMvir_bound_gp(HMFbase_gp):
+    def __init__(self, verbose=False):
+        self.verbose       = verbose
+        self.emunamestr    = 'cumhmf_rockstar_Mvir_bound'
+        self.n_sample      = 129
+        self.nvec          = 10
+        self.NormBeforePCA = True
+        self.NormBeforeGP  = True
+        self.mhmax_ind = np.array([36,38,40,41,42,44,45,47,49,50,52,52]) # mean M_h max
+        self._load_data()
+        
+    def get_data(self):
+        return super().get_data() 
+
