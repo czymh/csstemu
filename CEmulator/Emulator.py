@@ -9,7 +9,7 @@ from .cosmology import Cosmology
 from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
-from .emulator.HMF import HMFRockstarM200m_gp, HMFFoFM200c_gp, HMFRockstarMvir_gp
+from .emulator.HMF import HMFRockstarM200m_gp, HMFFoFM200c_gp, HMFRockstarMvir_gp, HMFRockstarMvir_bound_gp
 from .emulator.Ximm import Ximm_cb_gp
 from .emulator.Xihm import XihmMassBin_gp
 from .emulator.Pkhm import PkhmMassBin_gp
@@ -976,12 +976,15 @@ class HMF_CEmulator(CBaseEmulator):
         self.HMFRockstarM200m = HMFRockstarM200m_gp(verbose=verbose)
         self.HMFFoFM200c      = HMFFoFM200c_gp(verbose=verbose)
         self.HMFRockstarMvir  = HMFRockstarMvir_gp(verbose=verbose)
+        self.HMFRockstarMvirb = HMFRockstarMvir_bound_gp(verbose=verbose)
+        
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
         self.HMFRockstarM200m.ncosmo = self.ncosmo
         self.HMFFoFM200c.ncosmo      = self.ncosmo
         self.HMFRockstarMvir.ncosmo  = self.ncosmo
+        self.HMFRockstarMvirb.ncosmo = self.ncosmo
     
     def _2d_interp(self, ypred, diff=False, massdef='RockstarM200m'):
         '''
@@ -992,7 +995,7 @@ class HMF_CEmulator(CBaseEmulator):
             rho_type = 'matter'
             mhmin_ind = self.HMFRockstarM200m.mhmin_ind
             mhmax_ind = self.HMFRockstarM200m.mhmax_ind
-            m_edges   = self.HMFRockstarM200m.m_edges   
+            m_edges   = self.HMFRockstarM200m.m_edges
         elif massdef == 'FoFM200c':
             Delta = 200
             rho_type = 'critical'
@@ -1004,9 +1007,15 @@ class HMF_CEmulator(CBaseEmulator):
             rho_type = 'matter'
             mhmin_ind = self.HMFRockstarMvir.mhmin_ind
             mhmax_ind = self.HMFRockstarMvir.mhmax_ind
-            m_edges   = self.HMFRockstarMvir.m_edges           
+            m_edges   = self.HMFRockstarMvir.m_edges
+        elif massdef == 'RockstarMvir_bound':
+            Delta = "vir"
+            rho_type = 'matter'
+            mhmin_ind = self.HMFRockstarMvirb.mhmin_ind
+            mhmax_ind = self.HMFRockstarMvirb.mhmax_ind
+            m_edges   = self.HMFRockstarMvirb.m_edges
         else:
-            raise ValueError('Mass definition %s is not supported.'%massdef)
+            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
         mcen      = 10**((np.log10(m_edges[1:]) + np.log10(m_edges[:-1]))/2)
         dlnM      = np.log(m_edges[1]) - np.log(m_edges[0])
         m_edges_l = np.logspace(10, 17, 70+1)
@@ -1021,9 +1030,9 @@ class HMF_CEmulator(CBaseEmulator):
             yplt     = ypred[icol_sta:icol_end]# * t08base[iz, mhmin_ind[iz]:mhmax_ind[iz]]
             yind     = yplt > 0
             yfunc    = UnivariateSpline(xplt[yind], np.log10(yplt[yind]), k=1, s=0, ext=0)
-            #yfunc    = interp1d(xplt[yind], np.log10(yplt[yind]), kind='cubic', fill_value='extrapolate')
+            # yfunc    = interp1d(xplt[yind], np.log10(yplt[yind]), kind='linear', fill_value='extrapolate')
             ypred_[iz,:] = 10**yfunc(np.log10(m_edges_l[:-1]))
-            
+        
         # ypred_[ypred_<=0] = 1e-32
         ypred_  = ypred_[::-1,:] * t08base[::-1,:] # invert the redshift
         ### z space use cubic spline while M space use cubic interpolation
@@ -1037,11 +1046,11 @@ class HMF_CEmulator(CBaseEmulator):
                 ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_/2)+addnum) / dlnM_
             self.addnum = 1 - np.min(ypred_new)
             spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
-                                                         np.log10(ypred_new+self.addnum), kx=1, ky=1)(z, np.log10(M))
+                                                         np.log10(ypred_new+self.addnum), kx=1, ky=3)(z, np.log10(M))
         else:
             self.addnum = 1 - np.min(ypred_)
             spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
-                                                         np.log10(ypred_+self.addnum), kx=1, ky=1)(z, np.log10(M))
+                                                         np.log10(ypred_+self.addnum), kx=1, ky=3)(z, np.log10(M))
         return spline
     
     def _get_massdef_Delta(self, z, Pcb=True, Delta=200, rho_type='matter'):
@@ -1190,7 +1199,7 @@ class HMF_CEmulator(CBaseEmulator):
                 a1,a2,az,p1,p2,q1,q2,qz = np.array([0.77283085,0.3686431,-0.03214047,-0.46080809,-0.53419608,0.37336379,-0.32322067,-0.19204407])
             elif massdef == 'FoFM200c':
                 a1,a2,az,p1,p2,q1,q2,qz = np.array([0.76595201,0.38539018,-0.14234157,-0.52358138,-0.73425449,0.32078283,-0.40464143,0.1526956])
-            elif massdef == 'RockstarMvir':
+            elif massdef == 'RockstarMvir' or massdef == 'RockstarMvir_bound':
                 a1,a2,az,p1,p2,q1,q2,qz = np.array([0.76447491,0.41714731,-0.06177372,-0.46860976,-0.65112204,0.38826178,-0.36955881,-0.0068741])
             else:
                 raise ValueError('The massdef = %s is not supported yet.'%massdef)
@@ -1198,7 +1207,7 @@ class HMF_CEmulator(CBaseEmulator):
             if massdef == 'RockstarMvir':
                 a1,a2,az,p1,p2,q1,q2,qz = np.array([0.7962, 0.1449, -0.0658, -0.5612, -0.4743, 0.3688, -0.2804, 0.0251])
             else:
-                raise ValueError('The massdef = %s is not supported yet.'%massdef)
+                raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
         if Pcb:
             Omegamfunc = self.Cosmo.get_Omegam
             rho_m      = self.Cosmo.rho_crit * self.Cosmo.Omegam ## h^{2}M_{sun}Mpc^{-3}
@@ -1240,8 +1249,10 @@ class HMF_CEmulator(CBaseEmulator):
             ypred_ = self.HMFFoFM200c.get_data()
         elif massdef == 'RockstarMvir':
             ypred_ = self.HMFRockstarMvir.get_data()
+        elif massdef == 'RockstarMvir_bound':
+            ypred_ = self.HMFRockstarMvirb.get_data()
         else:
-            raise ValueError('The massdef = %s is not supported yet.'%massdef)
+            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
         cumhmf = self._2d_interp(ypred_, massdef=massdef)(z=z, M=M) - self.addnum
         return cumhmf * V * 1e-9
 
@@ -1264,8 +1275,10 @@ class HMF_CEmulator(CBaseEmulator):
             ypred_ = self.HMFFoFM200c.get_data()
         elif massdef == 'RockstarMvir':
             ypred_ = self.HMFRockstarMvir.get_data()
+        elif massdef == 'RockstarMvir_bound':
+            ypred_ = self.HMFRockstarMvirb.get_data()
         else:
-            raise ValueError('The massdef = %s is not supported yet.'%massdef) 
+            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
         dndlnM = self._2d_interp(ypred_, diff=True, massdef=massdef)(z=z, M=M) - self.addnum
         return dndlnM * 1e-9
 
