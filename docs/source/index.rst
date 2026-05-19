@@ -45,7 +45,7 @@ how to :doc:`install` the project.
 .. note::
 
    This project is under **active** development. 
-   You can visit the `GitHub repository <https://github.com/czymh/csstemu/dev>`__ for the latest updates.
+   You can visit the `GitHub repository <https://github.com/czymh/csstemu/tree/dev>`__ for the latest updates.
 
 Contents
 ========
