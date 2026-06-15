@@ -1,6 +1,6 @@
-from .fftlog import *
-from .cosmology import *
-from .preprocess import *
+from .fftlog import FFTLog
+from .cosmology import P2xi, xi2P
+from .galaxy import pk2xi, xi2pk, pk2wp, pk2dwp, fftbase
 
 name = "hankl"
 __version__ = "1.1.0"

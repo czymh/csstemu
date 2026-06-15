@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import inspect
+import warnings
 
 param_names  = ['Omegab', 'Omegam', 'H0', \
                 'ns', 'A', 'w', 'wa', 'mnu']
@@ -19,30 +20,31 @@ zlists = [3.00, 2.50, 2.00, 1.75, \
           1.50, 1.25, 1.00, 0.80, \
           0.50, 0.25, 0.10, 0.00]
 
-def check_z(zlists=zlists,z=None):
+def check_z(zlists=zlists,z=None, verbose=False):
     if z is None:
         z = zlists
         print('No redshift input, using default redshifts [0,3]-12.')
     zinput = np.atleast_1d(np.copy(z))
-    if np.any(zinput < zlists[-1]):
-        raise ValueError('Redshift z is smaller than the lower limit %.2f.'%zlists[-1])
-    if np.any(zinput > zlists[0]):
-        raise ValueError('Redshift z is larger than the upper limit %.2f.'%zlists[0])
-    if not np.all(np.diff(zinput) > 0.0):
-        zinput.sort()
-        print('Predicting redshifts (sorted):', zinput)
+    if np.any(zinput < zlists[-1]) and verbose:
+        warnings.warn('Redshift z is smaller than the lower limit %.2f.'%zlists[-1])
+    if np.any(zinput > zlists[0]) and verbose:
+        warnings.warn('Redshift z is larger than the upper limit %.2f.'%zlists[0])
+    if (not np.all(np.diff(zinput) > 0.0))  and verbose:
+        # zinput.sort()
+        # print('Predicting redshifts (sorted):', zinput)
+        warnings.warn("Redshift must be increasing!")
     return zinput
     
-def checkdata(dlists, d=None, dname='wavenumber'):
+def checkdata(dlists, d=None, dname='wavenumber', verbose=False):
     if d is None:
         raise ValueError('Please provide the %s.'%dname)
     dinput = np.atleast_1d(d)
-    if np.any(dinput < dlists[0]-1e-8):
-        raise ValueError('The input of [%s] min=%.8f is smaller than the lower limit %.8f.'%(dname, np.min(dinput), dlists[0]))
-    if np.any(dinput > dlists[-1]+1e-8):
-        raise ValueError('The input of [%s] max=%.8f is larger than the upper limit %.8f.'%(dname, np.max(dinput), dlists[-1]))
-    if not np.all(np.diff(dinput) > 0.0):
-        raise ValueError('%s must be strictly increasing!'%dname)
+    if np.any(dinput < dlists[0]-1e-8) and verbose:
+        warnings.warn('The input of [%s] min=%.8f is smaller than the lower limit %.8f.'%(dname, np.min(dinput), dlists[0]))
+    if np.any(dinput > dlists[-1]+1e-8) and verbose:
+        warnings.warn('The input of [%s] max=%.8f is larger than the upper limit %.8f.'%(dname, np.max(dinput), dlists[-1]))
+    if (not np.all(np.diff(dinput) > 0.0)) and verbose:
+        warnings.warn('%s must be strictly increasing!'%dname)
     return dinput
 
 def NormCosmo(cosmologies, param_names, param_limits):
@@ -271,4 +273,3 @@ def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alph
     Delta_H = an*y**(3*f1) / (1+bn*y**f2 + (cn*y*f3)**(3-gamman))
     Delta_H = Delta_H / (1. + mun/y + nun/y/y) * (1 + fnu*0.977)
     return (Delta_Q + Delta_H) * (2*np.pi**2) / k**3
-

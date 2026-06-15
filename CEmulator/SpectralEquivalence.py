@@ -2,6 +2,7 @@ from scipy.optimize import minimize
 from .cosmology import Cosmology
 import numpy as np
 from copy import deepcopy
+from scipy.optimize import newton, root_scalar
 #####################################################################################################################
 ######################## For the spectral equivalence method ########################################################
 #####################################################################################################################
@@ -29,7 +30,26 @@ def finite_diff_newton(f, x0, tol=1e-10, max_iter=100, h=1e-5):
         x = x_new
     return np.NaN, np.NaN # if max_iter is reached
 
-def GetErr_csstemu_w(wz, z, ichi, csstemu, zstar=1100):
+def _root_find_newton(f, x0, tol=1e-10, max_iter=100, h=1e-5):
+    """
+    Fast root-finding function based on SciPy's secant method (no derivative needed).
+    The interface is identical to the original function.
+    """
+    try:
+        # Use SciPy's Newton method without providing a derivative -> automatically uses the secant method
+        root = newton(f, x0, fprime=None, tol=tol, maxiter=max_iter)
+        
+        # Simulate the original safeguard: if |root| > 10, return NaN
+        if not np.isfinite(root) or abs(root) > 10:
+            return np.nan, np.nan
+        
+        fx = f(root)
+        return root, fx
+    except RuntimeError:
+        # Maximum iterations reached or an error occurred, return NaN
+        return np.nan, np.nan
+
+def GetErr_csstemu_w(wz, z, ichi, csstemu, zstar=1100, neutrino_matter_like=False):
     '''
     wz: [w0]
     z: redshift
@@ -48,10 +68,10 @@ def GetErr_csstemu_w(wz, z, ichi, csstemu, zstar=1100):
     cosmos['wa']     = 0
     csstemu_i  = Cosmology()
     csstemu_i.set_cosmos(cosmos)
-    dlss_eq    = csstemu_i.comoving_distance(zstar) - csstemu_i.comoving_distance(z)
+    dlss_eq    = csstemu_i.comoving_distance(zstar, neutrino_matter_like) - csstemu_i.comoving_distance(z, neutrino_matter_like)
     return np.abs(1 - dlss_eq/ichi)
 
-def GetErr_csstemu_w0wa(wz, z, ichi, csstemu, zstar=1100):
+def GetErr_csstemu_w0wa(wz, z, ichi, csstemu, zstar=1100, neutrino_matter_like=False):
     '''
     wz: [w0, wa]
     z: redshift
@@ -70,10 +90,10 @@ def GetErr_csstemu_w0wa(wz, z, ichi, csstemu, zstar=1100):
     cosmos['wa']     = wz[1]
     csstemu_i  = Cosmology()
     csstemu_i.set_cosmos(cosmos)
-    dlss_eq    = csstemu_i.comoving_distance(zstar) - csstemu_i.comoving_distance(z)
+    dlss_eq    = csstemu_i.comoving_distance(zstar, neutrino_matter_like) - csstemu_i.comoving_distance(z, neutrino_matter_like)
     return np.abs(1 - dlss_eq/ichi)
 
-def SpectralEquivalence_DE(csstemu, zlists, wCDM=False, return_err=False):
+def SpectralEquivalence_DE(csstemu, zlists, wCDM=False, return_err=False, method="newton", w0wamethod="L-BFGS-B", neutrino_matter_like=False):
     '''
     Spectral equivalence method to find the auxiliary wCDM or w0waCDM model for a given CPL model
     
@@ -82,14 +102,18 @@ def SpectralEquivalence_DE(csstemu, zlists, wCDM=False, return_err=False):
     wCDM: if True, find the equivalent wCDM model, otherwise find the equivalent w0waCDM model
     return_err: if True, also return the error of the distance to lss
     '''
-    chi_z_to_lss = csstemu.Cosmo.comoving_distance(1100) - csstemu.Cosmo.comoving_distance(zlists)
+    chi_z_to_lss = csstemu.Cosmo.comoving_distance(1100, neutrino_matter_like) - csstemu.Cosmo.comoving_distance(zlists, neutrino_matter_like)
     if wCDM:
+        if method == "newton":
+            root_func = _root_find_newton
+        elif method == "finite_diff_newton": # old version
+            root_func = finite_diff_newton
         wconst_arr = np.ones((len(chi_z_to_lss))) * csstemu.Cosmo.w0
         err_chi    = 100 * np.ones((len(chi_z_to_lss)))
         max_iter   = 100
         for cind, ichi in enumerate(chi_z_to_lss):
-            func = lambda w: GetErr_csstemu_w(w, zlists[cind], ichi, csstemu)
-            wconst_arr[cind], err_chi[cind] = finite_diff_newton(func, wconst_arr[cind], max_iter=max_iter, tol=1e-7)
+            func = lambda w: GetErr_csstemu_w(w, zlists[cind], ichi, csstemu, neutrino_matter_like=neutrino_matter_like)
+            wconst_arr[cind], err_chi[cind] = root_func(func, wconst_arr[cind], max_iter=max_iter, tol=1e-7)
         if return_err:        
             return wconst_arr, err_chi
         else:
@@ -103,9 +127,9 @@ def SpectralEquivalence_DE(csstemu, zlists, wCDM=False, return_err=False):
         err_chi      = 100 * np.ones((len(chi_z_to_lss)))
         bounds       = [(-1.3, -0.7), (-0.5, 0.5)]
         for cind, ichi in enumerate(chi_z_to_lss):
-            func = lambda wz: GetErr_csstemu_w0wa(wz, zlists[cind], ichi, csstemu)
+            func = lambda wz: GetErr_csstemu_w0wa(wz, zlists[cind], ichi, csstemu, neutrino_matter_like=neutrino_matter_like)
             min_result = minimize(func, [w0_arr[cind], wa_arr[cind]],
-                                        method='L-BFGS-B', bounds=bounds)
+                                  method=w0wamethod, bounds=bounds)
             w0_arr[cind], wa_arr[cind] = min_result.x
             err_chi[cind] = min_result.fun
         if return_err:
@@ -143,9 +167,14 @@ def SpectralEquivalence_As(csstemu, zlists, w0_arr, wa_arr=None, sigma8_type='CL
         sigma8_target = np.array([csstemu_r.get_sigma_cb_z(z=z, R=8, type='CAMB', camb_results=camb_results) for z in zlists])
         As = csstemu_r.Cosmo.As 
     for iz in range(len(zlists)):
-        csstemu_r.set_cosmos(Omegab=Omegab, Omegac=Omegac, H0=H0, As=As, ns=ns, 
-                             w=w0_arr[iz], wa=wa_arr[iz], mnu=mnu) #, checkbound=False
-        Asfactor = (sigma8_target[iz]/csstemu_r.get_sigma_cb_z(z=zlists[iz], R=8))**2 
+        try:
+            csstemu_r.set_cosmos(Omegab=Omegab, Omegac=Omegac, H0=H0, As=As, ns=ns, 
+                                 w=w0_arr[iz], wa=wa_arr[iz], mnu=mnu)
+            Asfactor = (sigma8_target[iz]/csstemu_r.get_sigma_cb_z(z=zlists[iz], R=8))**2 
+        except ValueError:
+            csstemu_r.set_cosmos(Omegab=Omegab, Omegac=Omegac, H0=H0, As=As, ns=ns, 
+                                 w=w0_arr[iz], wa=wa_arr[iz], mnu=mnu, checkbound=False)
+            Asfactor = (sigma8_target[iz]/csstemu_r.get_sigma_cb_z(z=zlists[iz], R=8, type=sigma8_type))**2 
         Aseq_list[iz] = As * Asfactor
     return Aseq_list
             

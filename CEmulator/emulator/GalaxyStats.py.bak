@@ -1,0 +1,712 @@
+"""
+Galaxy Statistics Calculator for CSST Emulator.
+
+This module provides efficient calculation of galaxy clustering statistics
+from Halo Occupation Distribution (HOD) models combined with halo statistics
+from the CSST emulator. It supports galaxy-matter correlation, galaxy-galaxy
+correlation, and related observables.
+
+The calculations use efficient integration methods with caching for HOD
+weights to optimize performance when computing statistics for multiple
+redshifts or scales.
+
+Classes
+-------
+GalaxyStatsCalculator
+    Main class for computing galaxy statistics from HOD and halo emulators
+
+Functions
+---------
+compute_projected_correlation
+    Compute projected correlation function w_p(r_p) from xi(r)
+
+References
+----------
+.. [1] Zheng, Z. et al. 2005, ApJ, 633, 791
+.. [2] Zehavi, I. et al. 2005, ApJ, 630, 1
+
+Examples
+--------
+>>> from CEmulator.emulator.GalaxyStats import GalaxyStatsCalculator
+>>> from CEmulator.emulator.HOD import Zheng05HOD
+>>> calc = GalaxyStatsCalculator(hmf_emu, xihm_emu, xihh_emu)
+>>> hod = Zheng05HOD()
+>>> hod_params = {'logMmin': 12.0, 'sigma_logM': 0.5,
+...               'logM0': 12.5, 'logM1': 13.5, 'alpha': 1.0}
+>>> ngal = calc.compute_ngal(z=0.5, hod_model=hod, **hod_params)
+>>> Xigm = calc.compute_Xigm(r, z, hod_model=hod, **hod_params)
+"""
+
+import numpy as np
+from scipy.integrate import simpson
+from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator, interp1d
+from ..hankl.galaxy import fftbase, xi2P, pk2xi, pk2wp, pk2dwp
+from .SatelliteProfile import SatelliteProfile, concentration_duffy08
+from ..cosmology import RHO_CRIT_0
+
+
+class GalaxyStatsCalculator:
+    """
+    Calculator for galaxy clustering statistics from HOD models.
+
+    This class integrates HOD models with halo statistics (HMF, Xihm, Xihh)
+    to compute galaxy clustering observables. It provides caching mechanisms
+    to optimize repeated calculations with the same HOD parameters.
+
+    Parameters
+    ----------
+    hmf_emu : object
+        Halo mass function emulator (e.g., HMFRockstarM200m_gp or HMF_CEmulator)
+        Must provide: get_dndlnM(z, M), get_Nhalo(z, M)
+    xihm_emu : object, optional
+        Halo-matter correlation emulator (e.g., BrhmRockstarM200m_gp or Xihm_CEmulator)
+        Must provide: get_xihm_lgnbar_threshold(z, r, lgden, massdef)
+    xihh_emu : object, optional
+        Halo-halo correlation emulator (e.g., Xihh_gp or Xihh_CEmulator)
+        Must provide: get_xihh_lgnbar_threshold(z, r, lgden1, lgden2)
+    mass_def : str, default='RockstarM200m'
+        Halo mass definition to use
+    verbose : bool, default=False
+        Whether to print diagnostic information
+
+    Attributes
+    ----------
+    hmf : object
+        Halo mass function emulator instance
+    xihm : object
+        Halo-matter correlation emulator instance
+    xihh : object
+        Halo-halo correlation emulator instance
+    mass_def : str
+        Current mass definition
+    M_grid : ndarray
+        Fixed mass grid for integrations (log-spaced from 1e11 to 1e15 Msun/h)
+    _cache : dict
+        Internal cache for HOD weights and derived quantities
+
+    Notes
+    -----
+    The calculator uses a fixed logarithmic mass grid for integrations.
+    HOD weights are cached based on the HOD model class and parameters,
+    so repeated calculations with the same parameters are fast.
+
+    The lgden range of the Xihm/Xihh emulators is [-5.0, -2.5], so mass
+    bins that produce number densities outside this range are automatically
+    excluded from the integration.
+
+    Examples
+    --------
+    >>> calc = GalaxyStatsCalculator(hmf_emu, xihm_emu, xihh_emu)
+    >>> hod = Zheng05HOD()
+    >>> params = {'logMmin': 12.0, 'sigma_logM': 0.5,
+    ...           'logM0': 12.5, 'logM1': 13.5, 'alpha': 1.0}
+    >>> ngal = calc.compute_ngal(z=0.5, hod_model=hod, **params)
+    >>> r = np.logspace(-1, 1, 50)
+    >>> Xigm = calc.compute_Xigm(r, z=0.5, hod_model=hod, **params)
+    """
+
+
+    def __init__(self, hmf_emu, xihm_emu=None, xihh_emu=None,
+                 mass_def='RockstarM200m', Omegam=0.315, 
+                 profile_type="xihm", concentration_model=concentration_duffy08, verbose=False):
+        """Initialize the galaxy statistics calculator."""
+        self.hmf = hmf_emu
+        self.xihm = xihm_emu
+        self.xihh = xihh_emu
+        self.mass_def = mass_def
+        self.Omegam = Omegam
+        self.verbose = verbose
+
+        # Fixed mass grid for integrations (user specification)
+        self.M_grid = np.logspace(12, 16.0, 21)
+        self.lnM_grid = np.log(self.M_grid)
+
+        # Fourier-space infrastructure
+        # r range: [0.001, 316] Mpc/h covers ξ_hh → 0 at large scales
+        self.fftbase = fftbase(fft_num=1, fft_logrmin=-5.0, fft_logrmax=3.0)
+        self.satellite_profile = SatelliteProfile(
+            profile_type=profile_type,
+            concentration_model=concentration_model,
+            Omegam=self.Omegam
+        )
+
+        # Cache for HOD weights
+        self._cache = {}
+        self._current_hod_key = None
+
+
+        # Cache for P_hh matrix (per redshift, keyed by z and M_arr)
+        self._phh_matrix_cache = None  # tuple: (z, M_arr, P_hh_grid)
+
+        # Cache for mass grid, ngal and uk_grid (per redshift)
+        self._mass_grid_cache = None  # tuple: (z, M_arr, lnM, dndlnM, Nhalo, valid)
+        self._ngal_cache = None  # tuple: (z, hod_key, ngal)
+        self._uk_grid_cache = None  # tuple: (z, uk_grid)
+
+        # Cache for Fourier-space Pgg and Pgm (per (z, hod_key))
+        self._pgg_fourier_cache = None  # tuple: (z, hod_key, Pgg)
+        self._pgm_fourier_cache = None  # tuple: (z, hod_key, Pgm)
+
+        # Cache for blended xi_hh grid (n_mass x n_mass x n_r) keyed by (z, M_arr, r)
+        self._xihh_mass_blend_cache = None  # tuple: (z, M_arr, r, grid)
+
+        # Cache for tree-level xi_mm (matter correlation) per (z, r)
+        self._xi_mm_cache = None  # tuple: (z, r_checksum, xi_mm)
+
+    def clear_cosmology_cache(self):
+        """
+        Clear cosmology-dependent caches (Xihh grid, P_hh matrix, etc.).
+
+        Called by the parent emulator when cosmology changes, to prevent
+        stale grid values from being returned.
+        """
+        self._phh_matrix_cache = None
+        self._mass_grid_cache = None
+        self._ngal_cache = None
+        self._uk_grid_cache = None
+        self._pgg_fourier_cache = None
+        self._pgm_fourier_cache = None
+        self._xihh_mass_blend_cache = None
+        self._xi_mm_cache = None
+
+    def _cache_matches(self, cached, target):
+        """Check if cached value matches target (both atleast_1d)."""
+        cached = np.atleast_1d(cached)
+        target = np.atleast_1d(target)
+        if len(cached) != len(target):
+            return False
+        return np.allclose(cached, target)
+
+    def _get_xi_mm(self, z, r):
+        """
+        Tree-level matter correlation xi_mm(r) = P2xi[P_lin](r).
+
+        Cached per (z, r) to avoid redundant FFTLog transforms.
+        Uses the separable decomposition: xi_tree(l1,l2) = b(l1)*b(l2)*xi_mm,
+        so this single transform serves all mass bin pairs.
+        """
+        z_key = np.atleast_1d(z)
+        r_key = np.atleast_1d(r)
+        if self._xi_mm_cache is not None:
+            cached_z, cached_r, cached_val = self._xi_mm_cache
+            if self._cache_matches(cached_z, z_key) and self._cache_matches(cached_r, r_key):
+                return cached_val
+
+        # Same k-grid as Xihh_CEmulator._get_xihh_tree
+        ks = np.logspace(-4.99, 1.99, 1024)
+        Plin = np.squeeze(self.xihh.get_pklin(z=z, k=ks, Pcb=True))
+        # FFTLog: P_lin(k) → ξ_mm(r)
+        if Plin.ndim == 1:
+            r0, xi_mm = pk2xi(ks, Plin)
+        else:
+            # Multiple redshifts: transform each
+            r0, xi_tmp = pk2xi(ks, Plin[0])
+            xi_mm = np.zeros((len(Plin), len(r0)))
+            xi_mm[0] = np.real(xi_tmp)
+            for iz in range(1, len(Plin)):
+                _, xi_tmp = pk2xi(ks, Plin[iz])
+                xi_mm[iz] = np.real(xi_tmp)
+        # Interpolate to target r grid
+        r_target = np.atleast_1d(r)
+        if xi_mm.ndim == 1:
+            xi_mm_interp = interp1d(r0, np.real(xi_mm), kind='cubic',
+                                     bounds_error=False, fill_value=0.0)(r_target)
+        else:
+            xi_mm_interp = np.zeros((len(Plin), len(r_target)))
+            for iz in range(len(Plin)):
+                xi_mm_interp[iz] = interp1d(r0, np.real(xi_mm[iz]), kind='cubic',
+                                             bounds_error=False, fill_value=0.0)(r_target)
+            xi_mm_interp = np.squeeze(xi_mm_interp)
+
+        self._xi_mm_cache = (z_key.copy(), r_key.copy(), xi_mm_interp)
+        return xi_mm_interp
+
+    # ------------------------------------------------------------------
+    # xi_hh on mass grid (differential, per-mass-bin)
+    # ------------------------------------------------------------------
+
+    def _get_xihh_mass_dire_grid(self, z, r, M_arr):
+        """
+        Compute xi_hh_dire(M_i, M_j) via 4D interpolator + 2nd-order
+        cross finite difference.
+
+        Uses a single vectorized call to Xihh.get_xihh with all
+        M_p = M * 1.01 and M_m = M * 0.99 lgden values (2*n_mass total).
+        The N-weighted finite difference converts from cumulative
+        (lgden-threshold) to differential (per-mass-bin).
+
+        Parameters
+        ----------
+        z : float
+            Redshift.
+        r : ndarray (n_r,)
+            Separations in Mpc/h.
+        M_arr : ndarray (n_mass,)
+            Mass bins in Msun/h.
+
+        Returns
+        -------
+        ndarray (n_mass, n_mass, n_r)
+            xi_hh_dire(M_i, M_j, r) for all mass pairs.
+        """
+        n_mass = len(M_arr)
+        r = np.atleast_1d(r)
+
+        # Numerical differentiation masses (same as Emulator.py convention)
+        M_p = M_arr * 1.01
+        M_m = M_arr * 0.99
+        N_p = np.squeeze(self.hmf.get_Nhalo(
+            z=np.atleast_1d(z), M=M_p, massdef=self.mass_def))
+        N_m = np.squeeze(self.hmf.get_Nhalo(
+            z=np.atleast_1d(z), M=M_m, massdef=self.mass_def))
+
+        # lgden values clipped to 4D interpolator valid range [-5, -2.5]
+        lgden_min, lgden_max = -5.0, -2.5
+        lgden_p = np.clip(np.log10(np.maximum(N_p, 1e-30)), lgden_min, lgden_max)
+        lgden_m = np.clip(np.log10(np.maximum(N_m, 1e-30)), lgden_min, lgden_max)
+
+        # Single batch call: evaluate all (2N)^2 pairs via 4D interpolator
+        # Xihh.get_xihh returns (n_lgden1, n_lgden2, n_z, n_r)
+        xi_all = self.xihh.Xihh.get_xihh(
+            z=np.atleast_1d(z), r=r,
+            lgden1=np.concatenate([lgden_p, lgden_m]),
+            lgden2=np.concatenate([lgden_p, lgden_m]))
+        xi_all = np.squeeze(xi_all, axis=2)  # (2N, 2N, n_r)
+
+        # Extract 4 sub-blocks (fully vectorized)
+        pp = xi_all[:n_mass, :n_mass, :]
+        pm = xi_all[:n_mass, n_mass:, :]
+        mp = xi_all[n_mass:, :n_mass, :]
+        mm = xi_all[n_mass:, n_mass:, :]
+
+        # N-weighted 2nd-order cross finite difference
+        Np_i = N_p[:, None, None]
+        Np_j = N_p[None, :, None]
+        Nm_i = N_m[:, None, None]
+        Nm_j = N_m[None, :, None]
+
+        numer = (pp * Np_i * Np_j + mm * Nm_i * Nm_j
+               - pm * Np_i * Nm_j - mp * Nm_i * Np_j)
+        denom = (Np_i - Nm_i) * (Np_j - Nm_j)
+        return numer / denom
+
+    def _get_xihh_mass_tree_grid(self, z, r, M_arr):
+        """
+        Tree-level xi_hh(M_i, M_j) = b(M_i) * b(M_j) * xi_mm(r).
+
+        Exploits separability: only 1 P2xi call total plus 1 bias call.
+
+        Parameters
+        ----------
+        z : float
+            Redshift.
+        r : ndarray (n_r,)
+            Separations in Mpc/h.
+        M_arr : ndarray (n_mass,)
+            Mass bins in Msun/h.
+
+        Returns
+        -------
+        ndarray (n_mass, n_mass, n_r)
+        """
+        biases = self.xihh.get_bias_mass(
+            z=np.atleast_1d(z), M=M_arr, massdef=self.mass_def)
+        biases = np.squeeze(biases)  # (n_mass,)
+
+        xi_mm = self._get_xi_mm(z, r)
+        if xi_mm.ndim == 2:
+            xi_mm = xi_mm[0]
+
+        return biases[:, None, None] * biases[None, :, None] * xi_mm[None, None, :]
+
+    def _get_xihh_mass_blend_grid(self, z, r, M_arr):
+        """
+        Full blended xi_hh(M_i, M_j, r) = dire * w(r) + tree * (1 - w(r)).
+
+        Cached by (z, r_checksum, M_checksum).
+
+        Parameters
+        ----------
+        z : float
+        r : ndarray (n_r,)
+        M_arr : ndarray (n_mass,)
+
+        Returns
+        -------
+        ndarray (n_mass, n_mass, n_r)
+        """
+        z_key = np.atleast_1d(z)
+        r_key = np.atleast_1d(r)
+
+        # Cache check
+        if self._xihh_mass_blend_cache is not None:
+            cached_z, cached_M, cached_r, cached_val = self._xihh_mass_blend_cache
+            if (self._cache_matches(cached_z, z_key)
+                    and self._cache_matches(cached_M, M_arr)
+                    and self._cache_matches(cached_r, r_key)):
+                return cached_val
+
+        xi_dire = self._get_xihh_mass_dire_grid(z, r_key, M_arr)
+        xi_tree = self._get_xihh_mass_tree_grid(z, r_key, M_arr)
+
+        rswitch = 40.0  # Mpc/h, same as Xihh_CEmulator
+        w = np.exp(-(r_key / rswitch) ** 4)
+
+        xi_blend = (xi_dire * w[None, None, :]
+                    + xi_tree * (1.0 - w[None, None, :]))
+
+        self._xihh_mass_blend_cache = (
+            z_key.copy(), M_arr.copy(), r_key.copy(), xi_blend)
+        return xi_blend
+
+    def _get_hod_cache_key(self, hod_model, **hod_params):
+        """
+        Generate a unique cache key for HOD model and parameters.
+
+        Parameters
+        ----------
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD parameters
+
+        Returns
+        -------
+        tuple
+            Hashable cache key
+        """
+        return (hod_model.__class__.__name__,
+                frozenset(hod_params.items()))
+
+    def _get_cached_hod_weights(self, hod_model, **hod_params):
+        """
+        Get cached HOD weights or compute and cache them.
+
+        Parameters
+        ----------
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD parameters
+
+        Returns
+        -------
+        tuple
+            (Ncen, Nsat, Ntot) arrays on the mass grid
+        """
+        cache_key = self._get_hod_cache_key(hod_model, **hod_params)
+
+        if cache_key not in self._cache:
+            if self.verbose:
+                print(f"Computing HOD weights for {cache_key[0]}")
+
+            Ncen = hod_model.Ncen(self.M_grid, **hod_params)
+            Nsat = hod_model.Nsat(self.M_grid, **hod_params)
+            Ntot = Ncen + Nsat
+
+            self._cache[cache_key] = {
+                'Ncen': Ncen,
+                'Nsat': Nsat,
+                'Ntot': Ntot,
+                'M_grid': self.M_grid.copy()
+            }
+
+        self._current_hod_key = cache_key
+        c = self._cache[cache_key]
+        return c['Ncen'], c['Nsat'], c['Ntot']
+
+    def clear_cache(self):
+        """Clear the HOD weights cache and Fourier caches."""
+        self._cache.clear()
+        self._current_hod_key = None
+        self._pgg_fourier_cache = None
+        self._pgm_fourier_cache = None
+        if self.verbose:
+            print("HOD cache cleared")
+
+    # ------------------------------------------------------------------
+    # Basic galaxy properties
+    # ------------------------------------------------------------------
+
+    def compute_ngal(self, z, hod_model, **hod_params):
+        r"""
+        Compute the galaxy number density n_gal.
+
+        The galaxy number density is computed by integrating the HOD-weighted
+        halo mass function:
+
+        .. math::
+            n_{\rm gal} = \int dM \frac{dn}{dM} \langle N | M \rangle
+
+        Parameters
+        ----------
+        z : float or array_like
+            Redshift(s)
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD model parameters
+
+        Returns
+        -------
+        float or ndarray
+            Galaxy number density in (Mpc/h)^(-3)
+
+        Notes
+        -----
+        Uses Simpson's integration on a logarithmic mass grid for better
+        accuracy than simple trapezoidal rule.
+        """
+        Ncen, Nsat, Ntot = self._get_cached_hod_weights(hod_model, **hod_params)
+
+        z = np.atleast_1d(z)
+        ngal = np.zeros(len(z))
+
+        for i, zi in enumerate(z):
+            # Get differential mass function on the fixed grid
+            dndlnM = np.atleast_1d(np.squeeze(
+                self.hmf.get_dndlnM(z=zi, M=self.M_grid)))
+            ngal[i] = simpson(dndlnM * Ntot, x=self.lnM_grid)
+
+        return ngal[0] if len(ngal) == 1 else ngal
+
+    def compute_f_sat(self, z, hod_model, **hod_params):
+        r"""
+        Compute the satellite fraction f_sat = N_sat / N_total.
+
+        Parameters
+        ----------
+        z : float or array_like
+            Redshift(s)
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD model parameters
+
+        Returns
+        -------
+        float or ndarray
+            Satellite fraction (0 to 1)
+        """
+        Ncen, Nsat, Ntot = self._get_cached_hod_weights(hod_model, **hod_params)
+
+        z = np.atleast_1d(z)
+        f_sat = np.zeros(len(z))
+
+        for i, zi in enumerate(z):
+            dndlnM = np.atleast_1d(np.squeeze(
+                self.hmf.get_dndlnM(z=zi, M=self.M_grid)))
+            nsat = simpson(dndlnM * Nsat, x=self.lnM_grid)
+            ntot = simpson(dndlnM * Ntot, x=self.lnM_grid)
+            f_sat[i] = nsat / ntot if ntot > 0 else 0.0
+
+        return f_sat[0] if len(f_sat) == 1 else f_sat
+
+    def compute_M_eff(self, z, hod_model, **hod_params):
+        r"""
+        Compute the effective halo mass for galaxy hosting.
+
+        Parameters
+        ----------
+        z : float or array_like
+            Redshift(s)
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD model parameters
+
+        Returns
+        -------
+        float or ndarray
+            Effective mass in Msun/h
+        """
+        Ncen, Nsat, Ntot = self._get_cached_hod_weights(hod_model, **hod_params)
+
+        z = np.atleast_1d(z)
+        M_eff = np.zeros(len(z))
+
+        for i, zi in enumerate(z):
+            dndlnM = np.atleast_1d(np.squeeze(
+                self.hmf.get_dndlnM(z=zi, M=self.M_grid)))
+            numer = simpson(dndlnM * Ntot * self.M_grid, x=self.lnM_grid)
+            denom = simpson(dndlnM * Ntot, x=self.lnM_grid)
+            M_eff[i] = numer / denom if denom > 0 else 0.0
+
+        return M_eff[0] if len(M_eff) == 1 else M_eff
+
+    def compute_bias(self, z, hod_model, **hod_params):
+        r"""
+        Compute the large-scale galaxy bias.
+
+        The galaxy bias is computed as the weighted average of the halo bias:
+
+        .. math::
+            b_g = \frac{1}{n_{\rm gal}} \int dM \frac{dn}{dM}
+            \langle N | M \rangle b_h(M)
+
+        Parameters
+        ----------
+        z : float or array_like
+            Redshift(s)
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD model parameters
+
+        Returns
+        -------
+        float or ndarray
+            Galaxy bias b_g
+        """
+        Ncen, Nsat, Ntot = self._get_cached_hod_weights(hod_model, **hod_params)
+        ngal = self.compute_ngal(z, hod_model, **hod_params)
+        ngal_arr = np.atleast_1d(ngal)
+
+        z = np.atleast_1d(z)
+        bias_g = np.zeros(len(z))
+
+        for i, zi in enumerate(z):
+            dndlnM = np.atleast_1d(np.squeeze(
+                self.hmf.get_dndlnM(z=zi, M=self.M_grid)))
+
+            # Use the HMF's bias model
+            try:
+                bias_h = np.atleast_1d(np.squeeze(
+                    self.hmf.get_bias_mass_threshold(
+                        z=zi, M=self.M_grid, massdef=self.mass_def)))
+            except Exception:
+                try:
+                    bias_h = np.atleast_1d(np.squeeze(
+                        self.hmf.get_bias(z=zi, M=self.M_grid,
+                                          massdef=self.mass_def)))
+                except Exception:
+                    bias_h = np.ones_like(self.M_grid)
+
+            integrand = dndlnM * Ntot * bias_h
+            bias_g[i] = simpson(integrand, x=self.lnM_grid) / ngal_arr[i]
+
+        return bias_g[0] if len(bias_g) == 1 else bias_g
+
+    # ------------------------------------------------------------------
+    # Galaxy-matter correlation: fast interpolation-based approach
+    # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+    # Galaxy-matter correlation: direct mass-based approach
+    # ------------------------------------------------------------------
+
+    def _get_xi_hm_for_masses(self, z, r, M_arr):
+        """
+        Evaluate xi_hm(r|M) directly on the mass grid.
+
+        Uses xihm.get_xihm_mass which internally applies N-weighted
+        finite difference to convert from cumulative to differential.
+
+        Parameters
+        ----------
+        z : float
+            Redshift.
+        r : ndarray (n_r,)
+            Separations in Mpc/h.
+        M_arr : ndarray (n_mass,)
+            Mass bins in Msun/h.
+
+        Returns
+        -------
+        ndarray (n_mass, n_r)
+            xi_hm(r | M_i) for each mass bin.
+        """
+        # xihm.get_xihm_mass returns (len(z), len(M), len(r))
+        result = self.xihm.get_xihm_mass(
+            z=np.atleast_1d(z), r=r, M=M_arr,
+            massdef=self.mass_def, Pcb=True)
+        return np.squeeze(result, axis=0)  # (n_mass, n_r)
+
+    def compute_Xigm(self, r, z, hod_model, **hod_params):
+        r"""
+        Compute the galaxy-matter correlation function xi_{gm}(r).
+
+        .. math::
+            \xi_{gm}(r) = \frac{1}{n_{\rm gal}} \int dM \frac{dn}{dM}
+            \langle N | M \rangle \xi_{hm}(r | M)
+
+        Parameters
+        ----------
+        r : array_like
+            Separation in Mpc/h
+        z : float or array_like
+            Redshift(s)
+        hod_model : HODModel
+            HOD model instance
+        **hod_params : dict
+            HOD model parameters
+
+        Returns
+        -------
+        ndarray
+            Galaxy-matter correlation with shape (len(z), len(r))
+
+        Raises
+        ------
+        ValueError
+            If xihm emulator was not provided
+        """
+        if self.xihm is None:
+            raise ValueError("Xihm emulator is required for compute_Xigm")
+
+        Ncen, Nsat, Ntot = self._get_cached_hod_weights(hod_model, **hod_params)
+        ngal = self.compute_ngal(z, hod_model, **hod_params)
+        ngal_arr = np.atleast_1d(ngal)
+
+        r = np.atleast_1d(r)
+        z = np.atleast_1d(z)
+
+        Xigm = np.zeros((len(z), len(r)))
+
+        for i, zi in enumerate(z):
+            # Get mass grid for this redshift
+            M_arr, lnM, dndlnM_arr, _, _ = self._get_mass_for_fourier(zi)
+            if len(M_arr) == 0:
+                if self.verbose:
+                    print(f"Warning: no valid mass bins for Xigm at z={zi}")
+                continue
+            # HOD weights on the mass grid
+            Ncen_z = hod_model.Ncen(M_arr, **hod_params)
+            Nsat_z = hod_model.Nsat(M_arr, **hod_params)
+            Ntot_z = Ncen_z + Nsat_z
+            # xi_hm for all mass bins via direct mass evaluation
+            xihm_z = self._get_xi_hm_for_masses(zi, r, M_arr)  # (n_mass, n_r)
+            # Integrate over mass (vectorised over radial bins)
+            lnM = np.log(M_arr)
+            integrand = dndlnM_arr * Ntot_z
+            Xigm[i, :] = simpson(
+                integrand[:, np.newaxis] * xihm_z, x=lnM, axis=0)
+            # Normalize by galaxy number density
+            Xigm[i] /= ngal_arr[i]
+        return Xigm
+
+    def _off_centering_kernel(k, f_off=0.0, R_off=0.0):
+        r"""
+        Off-centering kernel.
+
+        .. math::
+
+            H_{\rm off}(k) = 1 - f_{\rm off} + f_{\rm off}
+            \exp\left[-\frac{1}{2}(k R_{\rm off})^2\right]
+
+        Parameters
+        ----------
+        k : ndarray (n_k,)
+            Wavenumbers in h/Mpc.
+        f_off : float
+            Fraction of off-centred centrals.
+        R_off : float
+            Off-centering scale in Mpc/h.
+
+        Returns
+        -------
+        ndarray (n_k,)
+        """
+        return 1.0 - f_off + f_off * np.exp(-0.5 * (k * R_off) ** 2)
+
