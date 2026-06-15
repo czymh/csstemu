@@ -4,7 +4,7 @@ from scipy.spatial.distance import pdist, cdist, squareform
 import math
 from scipy.special import gamma, kv
 import warnings
-
+from copy import deepcopy
 
 GPR_CHOLESKY_LOWER = True
 
@@ -47,6 +47,11 @@ class Kernel:
         if not isinstance(b, Kernel):
             return Mul(self, Constant(b))
         return Mul(self, b)
+    def Kdiag(self, X):
+        '''
+        Returns the diagonal of the kernel k(X, X).
+        '''
+        raise NotImplementedError("Kdiag not implemented for base Kernel class.")
 
 class KernelOperator(Kernel):
     """
@@ -63,6 +68,8 @@ class Add(KernelOperator):
     '''
     def __call__(self, x1, x2=None):
         return self.k1(x1, x2) + self.k2(x1, x2)
+    def Kdiag(self, X):
+        return self.k1.Kdiag(X) + self.k2.Kdiag(X)
 
 class Mul(KernelOperator):
     '''
@@ -70,6 +77,8 @@ class Mul(KernelOperator):
     '''
     def __call__(self, x1, x2=None):
         return self.k1(x1, x2) * self.k2(x1, x2)
+    def Kdiag(self, X):
+        return self.k1.Kdiag(X) * self.k2.Kdiag(X)
 
 class Constant(Kernel):
     '''
@@ -79,7 +88,21 @@ class Constant(Kernel):
         self.constant_value = constant_value
     def __call__(self, x1, x2=None):
         return self.constant_value
-    
+
+class WhiteKernel(Kernel):
+    '''
+    White Kernel
+    '''
+    def __init__(self, noise_level=1.0, noise_level_bounds=(1e-5, 1e5)):
+        self.noise_level = noise_level
+        self.noise_level_bounds = noise_level_bounds
+    def __call__(self, X, Y=None):
+        if Y is None:
+            K = self.noise_level * np.eye(X.shape[0])
+            return K
+        else:
+            return np.zeros((X.shape[0], Y.shape[0]))
+  
 class RBF(Kernel):
     '''
     Squared Exponential kernel
@@ -296,6 +319,8 @@ class GaussianProcessRegressor:
         normalize_y: bool, default=True
         '''
         # Initialize the GaussianProcess class
+        X = deepcopy(X)
+        y = deepcopy(y)
         if normalize_y:
             self._y_train_mean = np.mean(y)
             self._y_train_std  = np.std(y)
@@ -430,5 +455,4 @@ class GaussianProcessRegressor:
             return y_mean, np.sqrt(y_var)
         else:
             return y_mean
-
 

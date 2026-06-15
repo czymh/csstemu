@@ -100,6 +100,20 @@ class HMFFoFM200c_gp(HMFbase_gp):
     def get_data(self):
         return super().get_data()
 
+class HMFFoFM200m_gp(HMFbase_gp):
+    def __init__(self, verbose=False):
+        self.verbose       = verbose
+        self.emunamestr    = 'cumhmf_fof_M200m'
+        self.n_sample      = 129
+        self.nvec          = 10
+        self.NormBeforePCA = True
+        self.NormBeforeGP  = True
+        self.mhmax_ind = np.array([36,38,40,41,43,45,46,48,50,51,52,53]) # mean M_h max 
+        self._load_data()
+        
+    def get_data(self):
+        return super().get_data()
+
 class HMFRockstarMvir_gp(HMFbase_gp):
     def __init__(self, verbose=False):
         self.verbose       = verbose

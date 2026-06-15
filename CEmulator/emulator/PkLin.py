@@ -64,8 +64,8 @@ class PkcbLin_gp:
         pkpred = pkpred[::-1,:]
         pkout  = np.zeros((pkpred.shape[0], len(z), len(k)))
         ### z space use cubic spline while k space use linear interpolation
-        spline = RectBivariateSpline(self.zlists[::-1], self.klist, pkpred, 
-                                            kx=3, ky=1)
+        spline = lambda z,k: 10**RectBivariateSpline(self.zlists[::-1], np.log10(self.klist), np.log10(pkpred), 
+                                                     kx=3, ky=1, bbox=[0, 3, -6, 6])(z, np.log10(k))
         pkout  = spline(z, k)
         return pkout
     
@@ -132,8 +132,8 @@ class Pknn_cbLin_gp:
         pkpred = pkpred[::-1,:]
         pkout  = np.zeros((pkpred.shape[0], len(z), len(k)))
         ### z space use cubic spline while k space use linear interpolation
-        spline = RectBivariateSpline(self.zlists[::-1], self.klist, pkpred, 
-                                            kx=3, ky=1)
+        spline = lambda z,k: 10**RectBivariateSpline(self.zlists[::-1], np.log10(self.klist), np.log10(pkpred), 
+                                                     kx=3, ky=1, bbox=[0, 3, -6, 6])(z, np.log10(k)) 
         pkout  = spline(z, k)
         return pkout
 
