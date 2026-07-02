@@ -1,4 +1,0 @@
-CEmulator
-CEmulator/GaussianProcess
-CEmulator/emulator
-CEmulator/hankl
