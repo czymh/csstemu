@@ -63,8 +63,12 @@ class JAXEmulator:
         # Load sub-models (numpy I/O)
         self._model_pkcblin = load_pkcblin_model(verbose=verbose)
         self._model_pknn_cblin = load_pknn_cblin_model(verbose=verbose)
+        # Boost-factor (Bk) emulators — each predicts P_nl_sim / P_base
+        self._model_bk_lin = load_bklin_model()              # Bk = P_nl / P_lin
+        self._model_bk_hmcode2020 = load_bkhmcode2020_model() # Bk = P_nl / P_hmcode2020
+        self._model_bk_halofit = load_bkhalofit_model()       # Bk = P_nl / P_halofit
+        # HMCODE-2020 helper: predicts P_hmcode2020 / P_lin (used as denominator)
         self._model_bk_lin2hmcode = load_bklin2hmcode_model()
-        self._model_bk_halofit = load_bkhalofit_model()
 
     # ── Normalization helper ───────────────────────────────────────
 
@@ -138,25 +142,58 @@ class JAXEmulator:
 
     @partial(jax.jit, static_argnames=('self', 'Pcb'))
     def get_pkhmcode2020(self, cosmo_8d, z, k, Pcb=False):
-        """Nonlinear power spectrum: P_lin * B_lin2hmcode."""
+        """HMCODE-2020 model nonlinear power spectrum.
+
+        P_hmcode2020(k,z) = P_lin(k,z) × B_lin2hmcode(k,z)
+
+        This is the HMCODE-2020 prediction itself, used as the *denominator*
+        in get_pknl(nltype='hmcode2020').  Equivalent to numpy
+        CBaseEmulator.get_pkHMCODE2020(lintype='Emulator').
+        """
         pklin = self.get_pklin(cosmo_8d, z, k, Pcb=Pcb)
         ncosmo = self._normalize(cosmo_8d)
         bk = predict_bk(self._model_bk_lin2hmcode, ncosmo, z, k)
         return pklin * bk
 
-    @partial(jax.jit, static_argnames=('self', 'Pcb'))
-    def get_pkhalofit(self, cosmo_8d, z, k, Pcb=False):
-        """Nonlinear power spectrum: P_lin * B_halofit."""
-        pklin = self.get_pklin(cosmo_8d, z, k, Pcb=Pcb)
-        ncosmo = self._normalize(cosmo_8d)
-        bk = predict_bk(self._model_bk_halofit, ncosmo, z, k)
-        return pklin * bk
-
     def get_pknl(self, cosmo_8d, z, k, nltype='hmcode2020', Pcb=False):
-        """Nonlinear power spectrum. nltype: 'hmcode2020' or 'halofit'."""
-        if nltype == 'hmcode2020':
-            return self.get_pkhmcode2020(cosmo_8d, z, k, Pcb=Pcb)
+        """Simulation-level nonlinear matter power spectrum.
+
+        The emulator predicts the *ratio*  Bk(k,z) = P_nl_sim / P_base
+        where P_base is a nonlinear model chosen by `nltype`.
+
+        The final result is  P_nl = P_base(k,z) × Bk(k,z).
+
+        Args:
+            nltype: 'linear', 'hmcode2020', or 'halofit'.
+                Controls which P_base is used as denominator.
+                - 'linear':     P_nl = P_lin  ×  B_lin  (full boost from linear)
+                - 'hmcode2020':  P_nl = P_hmcode2020 × B_hmcode2020
+                - 'halofit':     P_nl = P_halofit × B_halofit
+                  (NOT YET SUPPORTED — raises NotImplementedError)
+            Pcb: if True, return cb-only spectrum (excludes neutrino component).
+        """
+        ncosmo = self._normalize(cosmo_8d)
+
+        if nltype == 'linear':
+            # Bk_lin = P_nl_sim / P_lin
+            bk = predict_bk(self._model_bk_lin, ncosmo, z, k)
+            p_base = self.get_pklin(cosmo_8d, z, k, Pcb=Pcb)
+            return p_base * bk
+
+        elif nltype == 'hmcode2020':
+            # Bk_hmcode2020 = P_nl_sim / P_hmcode2020
+            bk = predict_bk(self._model_bk_hmcode2020, ncosmo, z, k)
+            # P_base = P_hmcode2020 = P_lin_cb × B_lin2hmcode
+            p_base = self.get_pkhmcode2020(cosmo_8d, z, k, Pcb=Pcb)
+            return p_base * bk
+
         elif nltype == 'halofit':
-            return self.get_pkhalofit(cosmo_8d, z, k, Pcb=Pcb)
+            raise NotImplementedError(
+                "nltype='halofit' is not yet supported in the JAX emulator. "
+                "The halofit P(k) requires an iterative root-finding solver "
+                "(Takahashi formula) that has not been ported to JAX. "
+                "Use nltype='linear' or nltype='hmcode2020' instead."
+            )
+
         else:
             raise ValueError(f"Unknown nltype: {nltype}")
