@@ -1,4 +1,5 @@
 .vscode
+.claude
 CEmulator/.ipynb_checkpoints
 docs/build
 build
