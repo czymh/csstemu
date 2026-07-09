@@ -1127,7 +1127,7 @@ class HMF_CEmulator(CBaseEmulator):
         return (3/20 * (12*np.pi)**(2/3) * (1 + 0.0123*np.log10(Omega_m_zall)))
 
     def _get_dlns_dlnR(self, z=None, M=None, dlnR=0.01, Pcb=True):
-        '''
+        r'''
         Get the dln\sigma/dlnR.
         Args:
             z   : float, redshift
@@ -1267,7 +1267,7 @@ class HMF_CEmulator(CBaseEmulator):
             return dndlnM
  
     def get_Nhalo(self, z=None, M=None, V=1, massdef='RockstarM200m'):
-        '''
+        r'''
         Get the number of haloes whose mass is not smaller than M. [ $N(\geq M)$ ]
         
         Args:
@@ -1295,7 +1295,7 @@ class HMF_CEmulator(CBaseEmulator):
         return cumhmf * V * 1e-9
 
     def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
-        '''
+        r'''
         Get the number density of haloes in the mass bin [ $dn/d\ln M$ ] with unit of [Mpc/h]^-3.
         [Affected by the binning effect, not recommended to use.]
         
@@ -2526,7 +2526,7 @@ class GalaxyEmulator(Xihm_CEmulator):
         )
 
     def wp(self, rp, z, pimax=100.0):
-        """
+        r"""
         Projected galaxy correlation function w_p(r_p, z).
 
         When *pimax* is given (default 100 Mpc/h), uses real-space projection
