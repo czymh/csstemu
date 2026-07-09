@@ -11,7 +11,10 @@ for the stable version, or
 
 .. code-block:: console
 
-   $ pip install git+https://github.com/czymh/csstemu/tree/dev
+   $ git clone https://github.com/czymh/csstemu
+   $ git checkout dev
+   $ cd csstemu
+   $ pip install .
 
 for the development version to use the latest function.
 
