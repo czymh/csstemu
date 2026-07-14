@@ -1,4 +1,8 @@
 import numpy as np
+try:
+    from numpy import trapezoid as trapz
+except ImportError:
+    from numpy import trapz
 import warnings
 import time
 from scipy.special import gamma
@@ -307,12 +311,12 @@ class CBaseEmulator:
             pcalc    = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma    = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
             else:
                 sigma = np.zeros(len(R))
                 for iR in range(len(R)):
                     W_R      = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma[iR] = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                    sigma[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
@@ -369,12 +373,12 @@ class CBaseEmulator:
             pcalc    = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma_cb = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
             else:
                 sigma_cb = np.zeros(len(R))
                 for iR in range(len(R)):
                     W_R          = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma_cb[iR] = np.sqrt(np.trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                    sigma_cb[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
@@ -1932,7 +1936,7 @@ class WeakLensingBaseEmulator(CBaseEmulator):
             ai = 1/(1+zi)
             zind  = znew>=zi
             chiz  = self.z2chi(znew[zind])
-            # norm = np.trapz(nnew, znew)
+            # norm = trapz(nnew, znew)
             norm  = np.sum(nnew*dzarr)
             if np.isclose(norm, 0, atol=1e-5):
                 kernel[ii] = 0
