@@ -13,6 +13,7 @@ All notable changes to CEmulator will be documented in this file.
 - **CAMB results caching** (`_camb_results_cache`). When fallback mode is triggered, CAMB is computed once in `set_cosmos()` and cached for reuse across all `get_*` calls, avoiding repeated expensive computations.
 - **CLASS lazy-initialization cache** (`_cosmo_class_cache`). The CLASS cosmology object is now created on first use (via `_get_cosmo_class_cache()`) rather than per-`get_*` call, then reused. The cache is cleared in `_sync_cosmologies()` alongside other caches.
 - **`_get_cosmo_class_cache()` helper method** on `CBaseEmulator`. Provides lazy-init access to the cached CLASS object with `kmax=100`.
+- **`Pkmm_CEmulator.get_pknl_extrp()`** function. Provides a stable extrapolation of the nonlinear power spectrum beyond the GP training range (k ∈ [1e-5, 1e2] h/Mpc). Computes the ratio `P_nl(k₀) / P_lin(k₀)` on a well-sampled interior k-grid where the GP emulator is accurate, then extrapolates this ratio to the target k values and multiplies by `P_lin(k)`. Supports `Pcb=True/False`, `nltype='linear'/'halofit'/'hmcode2020'`, and automatically inherits CAMB fallback behavior.
 
 ### Fixed
 
