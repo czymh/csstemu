@@ -914,6 +914,44 @@ class Pkmm_CEmulator(CBaseEmulator):
                 raise ValueError('The neutrino_mass_split = %s is not supported yet.'%neutrino_mass_split)                        
         return pknl
 
+    def get_pknl_extrp(self, z=None, k=None, Pcb=False, nltype="hmcode2020",
+                       neutrino_mass_split=None):
+        '''
+        Get the extrapolated nonlinear power spectrum for k in [1e-5, 1e2] h/Mpc
+        with fixed lintype="Emulator".
+
+        The function computes the ratio :math:`P_{\\rm nl}(k_0) / P_{\\rm lin}(k_0)`
+        on a well-sampled interior k-grid (k0 in [0.0063, 10] h/Mpc) where the GP
+        emulator is accurate, then extrapolates this ratio to the target k values
+        and multiplies by :math:`P_{\\rm lin}(k)` at the target k. This gives a
+        more stable extrapolation than directly evaluating P_nl at out-of-range k.
+
+        Args:
+            z           : float or array-like, redshift.
+            k           : float or array-like, wavenumber [h/Mpc].
+            Pcb         : bool, whether to output the cb power spectrum (if True)
+                          or the total power spectrum (if False [default]).
+            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.
+                          The reference power spectrum for the nonlinear ratio.
+                          Default is 'hmcode2020'.
+        Return:
+            array-like : nonlinear power spectrum with shape (len(z), len(k))
+        '''
+        if neutrino_mass_split is None:
+            neutrino_mass_split = self.neutrino_mass_split
+        k = np.atleast_1d(k)
+        z = check_z(self.zlists, z, verbose=self.verbose)
+        k0 = np.logspace(-2.2, 1, 512)
+        pnl0 = self.get_pknl(z=z, k=k0, Pcb=Pcb, lintype='Emulator',
+                             nltype=nltype, neutrino_mass_split=neutrino_mass_split)
+        plin0 = self.get_pklin(z=z, k=k0, Pcb=Pcb, type='Emulator',
+                               neutrino_mass_split=neutrino_mass_split)
+        plin = self.get_pklin(z=z, k=k, Pcb=Pcb, type='Emulator',
+                              neutrino_mass_split=neutrino_mass_split)
+        ratio = interp1d(np.log10(k0), pnl0 / plin0,
+                         kind='slinear', fill_value='extrapolate')(np.log10(k))
+        return ratio * plin
+
 ####### class for the matter correlation function emulator
 class Ximm_CEmulator(CBaseEmulator):
     '''
