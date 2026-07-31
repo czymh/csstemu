@@ -49,6 +49,9 @@ class CBaseEmulator:
         '''
         self.verbose             = verbose
         self.neutrino_mass_split = neutrino_mass_split
+        self._fallback_mode      = False
+        self._camb_results_cache = None
+        self._cosmo_class_cache  = None
         self.Cosmo               = Cosmology(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
         self.Pkcblin             = PkcbLin_gp(verbose=verbose)
         self.Pknn_cblin          = Pknn_cbLin_gp(verbose=verbose)
@@ -62,11 +65,11 @@ class CBaseEmulator:
         else:
             raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
    
-    def set_cosmos(self, Omegab=0.049, Omegac=0.26, 
-                   H0=67.66, As=None, sigma8=None, 
-                   ns=0.9665, w=-1.0, wa=0.0, 
+    def set_cosmos(self, Omegab=0.049, Omegac=0.26,
+                   H0=67.66, As=None, sigma8=None,
+                   ns=0.9665, w=-1.0, wa=0.0,
                    mnu=0.06, sigma8type='Emulator',
-                   checkbound=True):
+                   checkbound=True, fallback_to_camb=True, fallback_verbose=True):
         '''
         Set the cosmological parameters.
         
@@ -82,6 +85,8 @@ class CBaseEmulator:
             sigma8 : float, amplitude of the total matter power spectrum. If both As and sigma8 are provided, the As will be used. You can set As=None to activate sigma8.
             sigma8type: str, 'Emulator', 'CLASS' or 'CAMB', the method to calculate the sigma8.
             checkbound: bool, whether to check the parameter range.
+            fallback_to_camb: bool, whether to fall back to CAMB when parameters are out of the emulator design range. Default is True.
+            fallback_verbose: bool, whether to output a warning when falling back to CAMB. Default is True.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -94,14 +99,39 @@ class CBaseEmulator:
         cosmos['Omegam'] = Omegab + Omegac # Only CDM + baryon
         cosmos.pop('Omegac')
         n_params = len(self.param_names)
-        ## check the parameter range / except As 
+        ## Reset fallback state; will be set to True if any param is out of bounds
+        self._fallback_mode = False
+        ## check the parameter range / except As
         if checkbound:
+            out_of_bounds = []
             for ind, ikey in enumerate(self.param_names):
                 if ikey != 'A':
-                    if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
-                        raise ValueError(r'Parameter out of range %s = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                    if np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                        out_of_bounds.append((ikey, '>', self.param_limits[ikey][1]))
                     elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
-                        raise ValueError(r'Parameter out of range %s = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
+                        out_of_bounds.append((ikey, '<', self.param_limits[ikey][0]))
+            if len(out_of_bounds) > 0:
+                if not fallback_to_camb:
+                    ikey, op, limit = out_of_bounds[0]
+                    raise ValueError(r'Parameter out of range %s = %.4f %s %f.'
+                                     % (ikey, cosmos[ikey], op, limit))
+                else:
+                    try:
+                        import camb
+                    except ImportError:
+                        raise ImportError(
+                            'CAMB is not installed, which is required for '
+                            'fallback mode. Install with: pip install camb')
+                    if fallback_verbose:
+                        msg = ('Parameters out of emulator design range, '
+                               'falling back to CAMB:\n')
+                        for ikey, op, limit in out_of_bounds:
+                            msg += '  %s = %.4f (allowed: [%.4f, %.4f])\n' % (
+                                ikey, cosmos[ikey],
+                                self.param_limits[ikey][0],
+                                self.param_limits[ikey][1])
+                        warnings.warn(msg, UserWarning)
+                    self._fallback_mode = True
 
         if As is not None:
             cosmos['A']      = (As*1e9)
@@ -121,7 +151,11 @@ class CBaseEmulator:
                 self.Cosmo.set_cosmos(cosmos)
                 self._sync_cosmologies()
                 
-                sigma8_g = self.get_sigma8(type=sigma8type) 
+                # If in fallback mode and sigma8type is 'Emulator', use CAMB instead
+                _stype = sigma8type
+                if self._fallback_mode and sigma8type == 'Emulator':
+                    _stype = 'CAMB'
+                sigma8_g = self.get_sigma8(type=_stype)
                 # print('Guess sigma8:', sigma8_g)
                 As1e9 = As1e9 * sigma8*sigma8/sigma8_g/sigma8_g
             if self.verbose:
@@ -132,17 +166,43 @@ class CBaseEmulator:
         ## check the parameter range for As
         if checkbound:
             for ikey in ['A']:
-                if   np.any(cosmos[ikey] > self.param_limits[ikey][1]):
-                    raise ValueError(r'Parameter out of range %ss1e9 = %.4f > %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                if np.any(cosmos[ikey] > self.param_limits[ikey][1]):
+                    if not fallback_to_camb:
+                        raise ValueError(r'Parameter out of range %ss1e9 = %.4f > %f.'
+                                         % (ikey, cosmos[ikey], self.param_limits[ikey][1]))
+                    else:
+                        if fallback_verbose:
+                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                          'falling back to CAMB.'
+                                          % (cosmos[ikey], self.param_limits[ikey][0],
+                                             self.param_limits[ikey][1]), UserWarning)
+                        self._fallback_mode = True
                 elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
-                    raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'%(ikey, cosmos[ikey], self.param_limits[ikey][0])) 
+                    if not fallback_to_camb:
+                        raise ValueError(r'Parameter out of range %ss1e9 = %.4f < %f.'
+                                         % (ikey, cosmos[ikey], self.param_limits[ikey][0]))
+                    else:
+                        if fallback_verbose:
+                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                          'falling back to CAMB.'
+                                          % (cosmos[ikey], self.param_limits[ikey][0],
+                                             self.param_limits[ikey][1]), UserWarning)
+                        self._fallback_mode = True
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
         ## into the cosmologies array only One cosmology each time
         self.cosmologies = np.array([[cosmos['Omegab'], cosmos['Omegam'], cosmos['H0'], cosmos['ns'], \
                                       cosmos['A'], cosmos['w'], cosmos['wa'], cosmos['mnu']]])
         ### sync the cosmologies for all objects
+        _fallback = self._fallback_mode
         self._sync_cosmologies()
+        self._fallback_mode = _fallback
+
+        # Pre-compute CAMB cache if in fallback mode
+        if self._fallback_mode:
+            self._camb_results_cache = self.get_camb_results(non_linear='mead2020')
+        else:
+            self._camb_results_cache = None
 
     def _sync_cosmologies(self):
         '''
@@ -160,7 +220,18 @@ class CBaseEmulator:
             self.Tkcblin.ncosmo     = self.ncosmo
             self.Tkmmlin.ncosmo     = self.ncosmo
         else:
-            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split) 
+            raise ValueError('The neutrino_mass_split = %s is not supported yet.'%self.neutrino_mass_split)
+
+        # Clear cache state when cosmology changes
+        self._fallback_mode      = False
+        self._camb_results_cache = None
+        self._cosmo_class_cache  = None
+
+    def _get_cosmo_class_cache(self):
+        """Lazy-init CLASS cache. Computed on first use, reused thereafter."""
+        if self._cosmo_class_cache is None:
+            self._cosmo_class_cache = self.get_cosmo_class(kmax=100)
+        return self._cosmo_class_cache
                                 
     def get_cosmo_class(self, z=None, non_linear=None, kmax=10, neutrino_mass_split=None):
         '''
@@ -218,10 +289,22 @@ class CBaseEmulator:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
         # k = checkdata(self.Bkcb.klist, k, dname='wavenumber')
+
+        if self._fallback_mode:
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=False, var1='delta_nonu', var2='delta_nonu',
+                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=False, var1='delta_tot', var2='delta_tot',
+                    hubble_units=True, k_hunit=True)
+            pklin = pkfunc.P(z, k)
+            return pklin
+
         if   type == 'CLASS':
             if cosmo_class is None:
-                kmax = np.max(k)
-                cosmo_class = self.get_cosmo_class(z, kmax=kmax)
+                cosmo_class = self._get_cosmo_class_cache()
             pklin = np.zeros((len(z), len(k)))
             if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
                 pkfunc = cosmo_class.pk_cb_lin
@@ -284,9 +367,18 @@ class CBaseEmulator:
             raise ValueError('Only support one redshift now. Now z is %s.'%(builtins.type(z)))
         # h0 = self.Cosmo.h0 ## if match the sigma8 there is no Cosmo object
         h0 = self.cosmologies[0][2]/100
+
+        if self._fallback_mode:
+            # CAMB nonlinear results have extra internal redshift sampling;
+            # recompute fresh with just the requested z for correct indexing.
+            _cr = self.get_camb_results(z)
+            sigma = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
+                                   var1='delta_tot', var2='delta_tot')
+            return sigma
+
         if type == 'CLASS':
             if cosmo_class is None:
-                cosmo_class = self.get_cosmo_class(z)
+                cosmo_class = self._get_cosmo_class_cache()
             if np.isscalar(R):
                 sigma = cosmo_class.sigma(R/h0, z)
             else:
@@ -304,7 +396,7 @@ class CBaseEmulator:
                     zind = 0
                 else:
                     zind = np.where(cambzout==z)[0][0]
-            sigma = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
+            sigma = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                             var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
             kcalc    = np.logspace(-4.99, 1.99, 1000)
@@ -338,9 +430,18 @@ class CBaseEmulator:
             raise ValueError('Only support one redshift now. Now z is %s.'%(builtins.type(z)))
         # h0 = self.Cosmo.h0
         h0 = self.cosmologies[0][2]/100
+
+        if self._fallback_mode:
+            # CAMB nonlinear results have extra internal redshift sampling;
+            # recompute fresh with just the requested z for correct indexing.
+            _cr = self.get_camb_results(z)
+            sigma_cb = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
+                                      var1='delta_nonu', var2='delta_nonu')
+            return sigma_cb
+
         if type == 'CLASS':
             if cosmo_class is None:
-                cosmo_class = self.get_cosmo_class(z)
+                cosmo_class = self._get_cosmo_class_cache()
             if np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                 if np.isscalar(R):
                     sigma_cb = cosmo_class.sigma(R/h0, z)
@@ -366,7 +467,7 @@ class CBaseEmulator:
                     zind = 0
                 else:
                     zind = np.where(cambzout==z)[0][0]
-            sigma_cb = camb_results.get_sigmaR(R=8.0, z_indices=zind, hubble_units=True,
+            sigma_cb = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                                var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
             kcalc    = np.logspace(-4.99, 1.99, 1000)
@@ -518,6 +619,23 @@ class Pkmm_CEmulator(CBaseEmulator):
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
+
+        if self._fallback_mode:
+            # NOTE: cached CAMB results use 'mead2020' (HMCODE2020), not 'takahashi' (halofit).
+            # For a strictly correct halofit, CAMB would need to be recomputed on-the-fly.
+            # In practice, HMCODE2020 is an improved version of halofit and is an acceptable
+            # approximation for fallback purposes.
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_nonu', var2='delta_nonu',
+                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_tot', var2='delta_tot',
+                    hubble_units=True, k_hunit=True)
+            pkhalofit = pkfunc.P(z, k)
+            return pkhalofit
+
         if  lintype == 'Emulator':
             if Pcb:
                 fnu = 0.0
@@ -559,7 +677,7 @@ class Pkmm_CEmulator(CBaseEmulator):
                                           an, bn, cn, gamman, alphan, betan, mun, nun, h0)
         elif lintype == 'CLASS':
             if cosmo_class is None:
-                cosmo_class = self.get_cosmo_class(z, non_linear='halofit', neutrino_mass_split=neutrino_mass_split)
+                cosmo_class = self._get_cosmo_class_cache()
             if (Pcb) and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
                 pkfunc = cosmo_class.pk_cb
             else:
@@ -602,6 +720,19 @@ class Pkmm_CEmulator(CBaseEmulator):
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
+
+        if self._fallback_mode:
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_nonu', var2='delta_nonu',
+                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_tot', var2='delta_tot',
+                    hubble_units=True, k_hunit=True)
+            pkhmcode = pkfunc.P(z, k)
+            return pkhmcode
+
         if  lintype == 'Emulator':
             if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
                 Bkcbhmcode = self.Bkcb_lin2hmcode.get_Bk(z, k)
@@ -661,6 +792,21 @@ class Pkmm_CEmulator(CBaseEmulator):
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
+
+        if self._fallback_mode:
+            if Pcb and (not np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10)):
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_nonu', var2='delta_nonu',
+                    hubble_units=True, k_hunit=True)
+            else:
+                pkfunc = self._camb_results_cache.get_matter_power_interpolator(
+                    nonlinear=True, var1='delta_tot', var2='delta_tot',
+                    hubble_units=True, k_hunit=True)
+            pknl = pkfunc.P(z, k)
+            if neutrino_mass_split == 'degenerate':
+                pknl = self.Tkmmhmcode2020.get_Tkmmhmcode2020(z=z, k=k) * pknl
+            return pknl
+
         k = checkdata(self.Bkcb.klist, k, dname='wavenumber', verbose=self.verbose)
         ## get the nonlinear transfer for Pcb
         if   nltype == 'linear':
@@ -694,16 +840,16 @@ class Pkmm_CEmulator(CBaseEmulator):
             if lintype == 'CLASS':
                 if nltype == 'linear':
                     if (cosmo_class is None):
-                        cosmo_class = self.get_cosmo_class(z, non_linear=None)
+                        cosmo_class = self._get_cosmo_class_cache()
                     pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
                 elif nltype == 'halofit':
                     if (cosmo_class is None):
-                        cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
+                        cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
                     if (cosmo_class is None):
-                        cosmo_class = self.get_cosmo_class(z, non_linear='mead2020')
+                        cosmo_class = self._get_cosmo_class_cache()
                     pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
                 pknl   = np.zeros_like(pkcblin)
                 Pcurv  = self._get_Pcurv(k)
@@ -728,7 +874,7 @@ class Pkmm_CEmulator(CBaseEmulator):
                     pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'halofit':
                     if (camb_results is None):
-                        cosmo_class = self.get_cosmo_class(z, non_linear=None) # not use class halofit
+                        cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
