@@ -209,7 +209,7 @@ class Cosmology:
             a_low = min(a_min, 1e-5)
             # ~2048 points gives sub-percent trapezoidal error for smooth integrands
             n_grid = 2048
-            a_grid = np.logspace(np.log10(a_min), 0, n_grid)
+            a_grid = np.logspace(np.log10(a_low), 0, n_grid)
             # Evaluate 1/(E(a) * a^2) on the shared grid — one vectorized call
             z_grid = 1 / a_grid - 1
             inv_Ez_a2 = 1 / (self.get_Ez(z_grid, neutrino_matter_like) * a_grid**2)
