@@ -1644,6 +1644,8 @@ class Pkhm_CEmulator(HMF_CEmulator):
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
         self.BkhmRockstarM200m.ncosmo    = self.ncosmo
+        # clear cache
+        self.BkhmRockstarM200m._Bkhm_interp = None
 
     def get_pkhm_lgnbar_threshold(self, z=None, k=None, lgden=None, massdef='RockstarM200m', Pcb=True):
         '''
@@ -1755,6 +1757,8 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
         self.BrhmRockstarM200m.ncosmo = self.ncosmo
+        # clear cache
+        self.BkhmRockstarM200m._Brhm_interp = None
     
     def _get_xihm_lgnbar_threshold_tree(self, z=None, r=None, lgden=None, massdef='RockstarM200m', Pcb=True):
         '''
