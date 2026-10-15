@@ -22,13 +22,13 @@ zlists = [3.00, 2.50, 2.00, 1.75, \
 
 def check_z(zlists=zlists,z=None, verbose=False):
     if z is None:
-        z = zlists
+        z = zlists[::-1]
         print('No redshift input, using default redshifts [0,3]-12.')
     zinput = np.atleast_1d(np.copy(z))
-    if np.any(zinput < zlists[-1]) and verbose:
-        warnings.warn('Redshift z is smaller than the lower limit %.2f.'%zlists[-1])
-    if np.any(zinput > zlists[0]) and verbose:
-        warnings.warn('Redshift z is larger than the upper limit %.2f.'%zlists[0])
+    if np.any(zinput < np.min(zlists)) and verbose:
+        warnings.warn('Redshift z is smaller than the lower limit %.2f.'%np.min(zlists))
+    if np.any(zinput > np.max(zlists)) and verbose:
+        warnings.warn('Redshift z is larger than the upper limit %.2f.'%np.max(zlists))
     if (not np.all(np.diff(zinput) > 0.0))  and verbose:
         # zinput.sort()
         # print('Predicting redshifts (sorted):', zinput)

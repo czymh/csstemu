@@ -200,7 +200,7 @@ class CBaseEmulator:
 
         # Pre-compute CAMB cache if in fallback mode
         if self._fallback_mode:
-            self._camb_results_cache = self.get_camb_results(non_linear='mead2020')
+            self._camb_results_cache = self.get_camb_results(non_linear='mead2020', z=self.zlists[::-1])
         else:
             self._camb_results_cache = None
 
@@ -2070,7 +2070,7 @@ class WeakLensingBaseEmulator(CBaseEmulator):
             ns = self.Cosmo.ns;     mnu = self.Cosmo.mnu
             w0 = self.Cosmo.w0;     wa  = self.Cosmo.wa
             cosmo_ccl = pyccl.cosmology.Cosmology(Omega_c=Oc, Omega_b=Ob, h=h0, A_s=As, n_s=ns, m_nu=mnu, w0=w0, wa=wa,
-                                                  transfer_function='boltzmann_camb', mass_split='single')
+                                                  transfer_function='boltzmann_camb', mass_split=self.neutrino_mass_split)
             func = lambda z: cosmo_ccl.comoving_radial_distance(1/(1+z))
             self.zinterp   = np.linspace(0, zmax, 1000)
         else:
@@ -2193,7 +2193,7 @@ class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
             
         nell = len(ells)
         cl_kappa = np.zeros(nell)
-        zall  = np.linspace(0, zmax, 100+1, endpoint=True) 
+        zall  = np.linspace(1e-3, zmax, 100+1, endpoint=True) 
         if not hasattr(self, 'z2chi') or not hasattr(self, 'chi2z'):
             self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl)
         elif self.z2chi is None or self.chi2z is None:
