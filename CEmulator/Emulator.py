@@ -50,6 +50,7 @@ class CBaseEmulator:
         self.verbose             = verbose
         self.neutrino_mass_split = neutrino_mass_split
         self._fallback_mode      = False
+        self._fallback_warned    = False
         self._camb_results_cache = None
         self._cosmo_class_cache  = None
         self.Cosmo               = Cosmology(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
@@ -86,7 +87,7 @@ class CBaseEmulator:
             sigma8type: str, 'Emulator', 'CLASS' or 'CAMB', the method to calculate the sigma8.
             checkbound: bool, whether to check the parameter range.
             fallback_to_camb: bool, whether to fall back to CAMB when parameters are out of the emulator design range. Default is True.
-            fallback_verbose: bool, whether to output a warning when falling back to CAMB. Default is True.
+            fallback_verbose: bool, whether to output a warning when falling back to CAMB. Only the first occurrence per emulator instance is warned to avoid unbounded growth of the module ``__warningregistry__`` in long MCMC chains. Default is True.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -130,7 +131,7 @@ class CBaseEmulator:
                                 ikey, cosmos[ikey],
                                 self.param_limits[ikey][0],
                                 self.param_limits[ikey][1])
-                        warnings.warn(msg, UserWarning)
+                        self._warn_fallback(msg)
                     self._fallback_mode = True
 
         if As is not None:
@@ -172,10 +173,11 @@ class CBaseEmulator:
                                          % (ikey, cosmos[ikey], self.param_limits[ikey][1]))
                     else:
                         if fallback_verbose:
-                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
-                                          'falling back to CAMB.'
-                                          % (cosmos[ikey], self.param_limits[ikey][0],
-                                             self.param_limits[ikey][1]), UserWarning)
+                            self._warn_fallback(
+                                'Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                'falling back to CAMB.'
+                                % (cosmos[ikey], self.param_limits[ikey][0],
+                                   self.param_limits[ikey][1]))
                         self._fallback_mode = True
                 elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
                     if not fallback_to_camb:
@@ -183,10 +185,11 @@ class CBaseEmulator:
                                          % (ikey, cosmos[ikey], self.param_limits[ikey][0]))
                     else:
                         if fallback_verbose:
-                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
-                                          'falling back to CAMB.'
-                                          % (cosmos[ikey], self.param_limits[ikey][0],
-                                             self.param_limits[ikey][1]), UserWarning)
+                            self._warn_fallback(
+                                'Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                'falling back to CAMB.'
+                                % (cosmos[ikey], self.param_limits[ikey][0],
+                                   self.param_limits[ikey][1]))
                         self._fallback_mode = True
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
@@ -203,6 +206,24 @@ class CBaseEmulator:
             self._camb_results_cache = self.get_camb_results(non_linear='mead2020', z=self.zlists[::-1])
         else:
             self._camb_results_cache = None
+
+    def _warn_fallback(self, msg):
+        '''
+        Emit the CAMB-fallback warning at most once per emulator instance.
+
+        Python's warnings machinery stores every distinct message text in the
+        module-level ``__warningregistry__`` under the "default" filter. In an
+        MCMC chain each step has unique parameter values, so warning on every
+        call leaks one registry entry per step. Warning only once keeps memory
+        bounded while still informing the user that fallback was triggered.
+
+        Args:
+            msg : str, warning message to emit on the first fallback.
+        '''
+        if self._fallback_warned:
+            return
+        warnings.warn(msg, UserWarning)
+        self._fallback_warned = True
 
     def _sync_cosmologies(self):
         '''

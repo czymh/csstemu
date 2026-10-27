@@ -37,6 +37,8 @@ Examples
 >>> Xigm = calc.compute_Xigm(r, z, hod_model=hod, **hod_params)
 """
 
+from collections import OrderedDict
+
 import numpy as np
 from scipy.integrate import simpson
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator, interp1d
@@ -106,6 +108,11 @@ class GalaxyStatsCalculator:
     # Fixed lgden nodes for xi_hh GP+tree precomputation
     _LGDEN_NODES = np.array([-5.0, -4.5, -4.0, -3.5, -3.0, -2.5])
 
+    # Maximum number of (HOD model, parameters) entries kept in the HOD-weight
+    # cache. HOD parameters change at every MCMC step, so the cache must be
+    # bounded to avoid unbounded memory growth in long chains.
+    _HOD_CACHE_MAXSIZE = 16
+
     def __init__(self, hmf_emu, xihm_emu=None, xihh_emu=None,
                  mass_def='RockstarM200m', Omegam=0.315,
                  profile_type="xihm", concentration_model=concentration_duffy08,
@@ -131,8 +138,8 @@ class GalaxyStatsCalculator:
             Omegam=self.Omegam
         )
 
-        # Cache for HOD weights
-        self._cache = {}
+        # Bounded LRU cache for HOD weights (keyed by HOD model + parameters)
+        self._cache = OrderedDict()
         self._current_hod_key = None
 
         self.rswitch = 40.0 # xi_tree + GP blending scale for xi
@@ -317,7 +324,10 @@ class GalaxyStatsCalculator:
         """
         cache_key = self._get_hod_cache_key(hod_model, **hod_params)
 
-        if cache_key not in self._cache:
+        if cache_key in self._cache:
+            # Refresh recency so the LRU eviction keeps this entry
+            self._cache.move_to_end(cache_key)
+        else:
             if self.verbose:
                 print(f"Computing HOD weights for {cache_key[0]}")
 
@@ -331,6 +341,9 @@ class GalaxyStatsCalculator:
                 'Ntot': Ntot,
                 'M_grid': self.M_grid.copy()
             }
+            # Evict the least recently used entry once the cache is full
+            while len(self._cache) > self._HOD_CACHE_MAXSIZE:
+                self._cache.popitem(last=False)
 
         self._current_hod_key = cache_key
         c = self._cache[cache_key]

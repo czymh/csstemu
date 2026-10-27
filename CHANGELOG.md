@@ -19,6 +19,8 @@ All notable changes to CEmulator will be documented in this file.
 
 - **`get_sigma_z()` and `get_sigma_cb_z()` CAMB path**: hardcoded `R=8.0` replaced with the actual `R` argument, so `type='CAMB'` now correctly returns `sigma(R)` for any smoothing scale, not just `R=8.0`.
 - **`get_pkHMCODE2020()` with `Pcb=False`**: when in CAMB fallback mode, `Pcb=False` now works correctly (previously raised `ValueError` in the Emulator path).
+- **Unbounded warning-registry growth in fallback mode**: `set_cosmos(fallback_verbose=True)` now emits the out-of-range warning only once per emulator instance (`CBaseEmulator._warn_fallback()`, flag `_fallback_warned`). Previously every unique parameter combination added an entry to the module-level `__warningregistry__`, which grew linearly during long MCMC chains.
+- **Unbounded HOD-weight cache in `GalaxyStatsCalculator`**: `_cache` is now a bounded LRU (`OrderedDict`, `_HOD_CACHE_MAXSIZE = 16`) instead of a plain dict. With HOD parameters changing at every MCMC step, the old dict grew without limit.
 
 ### Changed
 
@@ -32,3 +34,4 @@ All notable changes to CEmulator will be documented in this file.
 - Added instance variables `_fallback_mode`, `_camb_results_cache`, `_cosmo_class_cache` to `CBaseEmulator.__init__`.
 - Cache clearing logic added to `CBaseEmulator._sync_cosmologies()`, which propagates to all subclasses (`Pkmm_CEmulator`, `HMF_CEmulator`, etc.).
 - Verification tests added at `test/test_camb_fallback.py` covering 10 scenarios: normal/fallback modes, cache invalidation, `R` bug fix, `Pcb=False`, `fallback_to_camb=False`, and sigma8 conversion.
+- Verification tests added at `test/test_cache_bounded.py` covering fallback-warning deduplication and the bounded HOD-weight LRU cache.
