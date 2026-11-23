@@ -52,6 +52,7 @@ class CBaseEmulator:
         self._fallback_mode      = False
         self._fallback_warned    = False
         self._camb_results_cache = None
+        self._camb_z_cache       = None
         self._cosmo_class_cache  = None
         self.Cosmo               = Cosmology(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
         self.Pkcblin             = PkcbLin_gp(verbose=verbose)
@@ -143,22 +144,40 @@ class CBaseEmulator:
             sigma8_g = 0.0
             As1e9    = 2.105
             abserr   = 1e-4
-            while np.abs(sigma8_g - sigma8) > abserr:
+            maxiter  = 15
+            _fallback0 = self._fallback_mode
+            _Alo, _Ahi = self.param_limits['A']
+            for _ in range(maxiter):
                 cosmos['A'] = As1e9
                 #use 'Emulator', 'CLASS' or 'CAMB' to get sigma8
                 self.cosmologies = np.array([[cosmos['Omegab'], cosmos['Omegam'], cosmos['H0'], cosmos['ns'], \
                                               cosmos['A'], cosmos['w'], cosmos['wa'], cosmos['mnu']]]) 
                 ### set the cosmology class
                 self.Cosmo.set_cosmos(cosmos)
+                # _sync_cosmologies resets _fallback_mode; restore the decision
+                # made by the bounds check above. As drifts while iterating, so
+                # re-test it every step instead of extrapolating the emulator.
                 self._sync_cosmologies()
-                
+                self._fallback_mode = _fallback0 or (
+                    checkbound and not (_Alo <= As1e9 <= _Ahi))
+
                 # If in fallback mode and sigma8type is 'Emulator', use CAMB instead
                 _stype = sigma8type
                 if self._fallback_mode and sigma8type == 'Emulator':
                     _stype = 'CAMB'
                 sigma8_g = self.get_sigma8(type=_stype)
-                # print('Guess sigma8:', sigma8_g)
+                if not np.isfinite(sigma8_g) or sigma8_g <= 0:
+                    raise CEmulatorFallbackError(
+                        'sigma8 -> As iteration got sigma8(%s) = %s at A*1e9 = %.6f, '
+                        'cannot continue.' % (_stype, sigma8_g, As1e9))
                 As1e9 = As1e9 * sigma8*sigma8/sigma8_g/sigma8_g
+                if np.abs(sigma8_g - sigma8) <= abserr:
+                    break
+            else:
+                raise CEmulatorFallbackError(
+                    'sigma8 -> As iteration did not converge in %d steps: '
+                    'sigma8(%s) = %.6f, target = %.6f.'
+                    % (maxiter, _stype, sigma8_g, sigma8))
             if self.verbose:
                 print('The As is set to %.6e (sigma8=%.6f) to match the input sigma8=%.6f.'%(cosmos['A']*1e-9, sigma8_g, sigma8)) 
         else:
@@ -203,7 +222,7 @@ class CBaseEmulator:
 
         # Pre-compute CAMB cache if in fallback mode
         if self._fallback_mode:
-            self._camb_results_cache = self.get_camb_results(non_linear='mead2020', z=self.zlists[::-1])
+            self._camb_results_cache = self._get_camb_results_guarded(non_linear='mead2020', z=self.zlists[::-1])
         else:
             self._camb_results_cache = None
 
@@ -246,6 +265,7 @@ class CBaseEmulator:
         # Clear cache state when cosmology changes
         self._fallback_mode      = False
         self._camb_results_cache = None
+        self._camb_z_cache       = None
         self._cosmo_class_cache  = None
 
     def _get_cosmo_class_cache(self):
@@ -253,6 +273,34 @@ class CBaseEmulator:
         if self._cosmo_class_cache is None:
             self._cosmo_class_cache = self.get_cosmo_class(kmax=100)
         return self._cosmo_class_cache
+
+    def _get_camb_results_guarded(self, z=None, non_linear=None, kmax=10):
+        '''
+        Run CAMB and translate any failure into CEmulatorFallbackError carrying
+        the offending parameter set, so a sampler can reject the point instead of
+        dying on a bare CAMBError.
+        '''
+        try:
+            return self.get_camb_results(z=z, non_linear=non_linear, kmax=kmax)
+        except Exception as e:
+            _p = ', '.join('%s=%.6g' % (n, v)
+                           for n, v in zip(self.param_names, self.cosmologies[0]))
+            raise CEmulatorFallbackError('CAMB failed for {%s}: %s' % (_p, e)) from e
+
+    def _get_camb_z_results(self, z):
+        '''
+        Single-redshift CAMB results for the current cosmology, memoized per z.
+
+        get_sigma_z needs a results object built for exactly one redshift so that
+        z_indices=0 is that redshift, and _get_dlns_dlnR asks for the same z three
+        times, so the per-z objects are reused until _sync_cosmologies drops them.
+        '''
+        key = float(z)
+        if self._camb_z_cache is None:
+            self._camb_z_cache = {}
+        if key not in self._camb_z_cache:
+            self._camb_z_cache[key] = self._get_camb_results_guarded(key)
+        return self._camb_z_cache[key]
                                 
     def get_cosmo_class(self, z=None, non_linear=None, kmax=10, neutrino_mass_split=None):
         '''
@@ -391,8 +439,8 @@ class CBaseEmulator:
 
         if self._fallback_mode:
             # CAMB nonlinear results have extra internal redshift sampling;
-            # recompute fresh with just the requested z for correct indexing.
-            _cr = self.get_camb_results(z)
+            # use the single-redshift object so z_indices=0 is the requested z.
+            _cr = self._get_camb_z_results(z)
             sigma = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
                                    var1='delta_tot', var2='delta_tot')
             return sigma
@@ -454,8 +502,8 @@ class CBaseEmulator:
 
         if self._fallback_mode:
             # CAMB nonlinear results have extra internal redshift sampling;
-            # recompute fresh with just the requested z for correct indexing.
-            _cr = self.get_camb_results(z)
+            # use the single-redshift object so z_indices=0 is the requested z.
+            _cr = self._get_camb_z_results(z)
             sigma_cb = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
                                       var1='delta_nonu', var2='delta_nonu')
             return sigma_cb

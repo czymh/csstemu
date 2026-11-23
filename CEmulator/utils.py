@@ -20,6 +20,19 @@ zlists = [3.00, 2.50, 2.00, 1.75, \
           1.50, 1.25, 1.00, 0.80, \
           0.50, 0.25, 0.10, 0.00]
 
+
+class CEmulatorFallbackError(RuntimeError):
+    '''
+    Raised when a parameter set cannot be turned into a usable cosmology: either
+    the CAMB fallback itself failed, or the sigma8 -> As iteration did not
+    converge.
+
+    Subclasses :py:class:`RuntimeError` so a sampler can catch it and assign a
+    zero likelihood, while the original CAMB exception stays on ``__cause__``.
+    '''
+    pass
+
+
 def check_z(zlists=zlists,z=None, verbose=False):
     if z is None:
         z = zlists[::-1]
