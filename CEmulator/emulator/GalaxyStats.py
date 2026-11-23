@@ -565,7 +565,10 @@ class GalaxyStatsCalculator:
                 result[iz] = xi_gp * w + xi_tree * (1.0 - w)
                 
             except Exception as e:
-                print(f"Error computing xi_hm for z={z_key[iz]}: {e}")
+                raise RuntimeError(
+                    '%s failed at z=%s; returning a zero block here would silently '
+                    'corrupt every galaxy statistic downstream.'
+                    % ('Computing xi_hm', z_key[iz])) from e
             
         return result
 
@@ -622,7 +625,10 @@ class GalaxyStatsCalculator:
                                     bounds_error=False, fill_value='extrapolate')
                     result[iz] = interp(np.log(M_arr))
             except Exception as e:
-                print(f"Error computing P_hm for z={z_key[iz]}: {e}")
+                raise RuntimeError(
+                    '%s failed at z=%s; returning a zero block here would silently '
+                    'corrupt every galaxy statistic downstream.'
+                    % ('Computing P_hm', z_key[iz])) from e
             
         return result
 
@@ -726,15 +732,11 @@ class GalaxyStatsCalculator:
                                              kind='linear', bounds_error=False,
                                              fill_value='extrapolate')
                         phh[iz, i, j, :] = interp_pk(np.log(k_target))
-                    except Exception:
-                        k_lin = k_target[k_target <= 50]
-                        Plin_lin = np.squeeze(self.xihh.get_pklin(
-                            z=self._z_pre[iz], k=k_lin, Pcb=True))
-                        Plin_interp = interp1d(
-                            np.log10(k_lin), np.log10(Plin_lin),
-                            kind='linear', bounds_error=False,
-                            fill_value="extrapolate")
-                        phh[iz, i, j, :] = np.zeros_like(k_target) 
+                    except Exception as e:
+                        raise RuntimeError(
+                            'Transforming xi_hh to P_hh failed at z=%s, mass indices '
+                            '(%d, %d); a zero block would silently corrupt the '
+                            '2-halo term.' % (z_key[iz], i, j)) from e 
                     if j > i:
                         phh[iz, j, i, :] = phh[iz, i, j, :]
         return phh

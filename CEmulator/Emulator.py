@@ -51,6 +51,7 @@ class CBaseEmulator:
         self.neutrino_mass_split = neutrino_mass_split
         self._fallback_mode      = False
         self._fallback_warned    = False
+        self._extrap_warned      = set()
         self._camb_results_cache = None
         self._camb_z_cache       = None
         self._cosmo_class_cache  = None
@@ -244,6 +245,13 @@ class CBaseEmulator:
         warnings.warn(msg, UserWarning)
         self._fallback_warned = True
 
+    def _warn_extrap(self, key, msg):
+        '''Emit an extrapolation warning once per key per instance.'''
+        if key in self._extrap_warned:
+            return
+        warnings.warn(msg, UserWarning)
+        self._extrap_warned.add(key)
+
     def _sync_cosmologies(self):
         '''
         Sync the cosmologies for all objects with the cosmology class.
@@ -357,6 +365,9 @@ class CBaseEmulator:
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
+        if np.any(z > 3.0) or np.any(z < 0.0):
+            self._warn_extrap('z', 'z=%s is outside the trained range [0, 3]; the linear '
+                                   'P(k) spline extrapolates there (reported once).' % (z,))
         # k = checkdata(self.Bkcb.klist, k, dname='wavenumber')
 
         if self._fallback_mode:
@@ -769,7 +780,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                                                                     hubble_units=True, k_hunit=True)
             pkhalofit = pkfunc.P(z,k)
         else:
-            raise ValueError('Type %s not supported yet.'%type) 
+            raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                             "or 'CAMB'." % (lintype,))
         return pkhalofit
     
     def get_pkHMCODE2020(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
@@ -833,7 +845,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                                                                     hubble_units=True, k_hunit=True)
             pkhmcode = pkfunc.P(z,k)
         else:
-            raise ValueError('Type %s not supported yet.'%type) 
+            raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                             "or 'CAMB'." % (lintype,))
         return pkhmcode 
       
     def get_pknl(self, z=None, k=None, Pcb=False, lintype='Emulator', nltype='hmcode2020', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
@@ -877,6 +890,10 @@ class Pkmm_CEmulator(CBaseEmulator):
             return pknl
 
         k = checkdata(self.Bkcb.klist, k, dname='wavenumber', verbose=self.verbose)
+        if np.any(k > 10.0):
+            self._warn_extrap('k', 'k=%s extends beyond the trained 10 h/Mpc; the nonlinear '
+                                   'ratio is extrapolated in log-log (reported once).'
+                              % (np.max(k),))
         ## get the nonlinear transfer for Pcb
         if   nltype == 'linear':
             Bkpred = self.Bkcb.get_Bk(z, k)
@@ -884,6 +901,9 @@ class Pkmm_CEmulator(CBaseEmulator):
             Bkpred = self.Bkcb_halofit.get_Bk(z, k)
         elif nltype == 'hmcode2020':
             Bkpred = self.Bkcb_hmcode2020.get_Bk(z, k)
+        else:
+            raise ValueError("nltype %r not supported yet; use 'linear', 'halofit' "
+                             "or 'hmcode2020'." % (nltype,))
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
             if   nltype == 'linear':
                 ## get the linear power spectrum for cb
@@ -943,7 +963,9 @@ class Pkmm_CEmulator(CBaseEmulator):
                     pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'halofit':
                     if (camb_results is None):
-                        cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
+                        # halofit below is always taken from the emulator, so what
+                        # we need here is the CAMB object for the neutrino term
+                        camb_results = self.get_camb_results(z, non_linear='takahashi')
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
@@ -973,7 +995,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                 else:
                     raise ValueError('This should not happen!')
             else:
-                raise ValueError('Type %s not supported yet.'%type) 
+                raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                                 "or 'CAMB'." % (lintype,))
             ######## for the neutrino mass split
             if neutrino_mass_split == 'single':
                 pknl = pknl
@@ -1214,6 +1237,8 @@ class HMF_CEmulator(CBaseEmulator):
         self._mass_from_lgden_interp_cache = {}
         self._interp_cache = {}   # key: (massdef, diff), value: (spline callable, addnum)
         self._fd_warned = False
+        self._zero_den_warned = False
+        self._lgden_warned = False
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
@@ -1283,6 +1308,19 @@ class HMF_CEmulator(CBaseEmulator):
                           UserWarning)
             self._fd_warned = True
         return ok
+
+    def _warn_zero_density(self, caller, mass, z):
+        '''
+        Report a mass bin whose number density is zero, at most once.
+
+        These bins are a legitimate outcome of the cumulative HMF underflowing,
+        but an MCMC step would print one line per bin per redshift.
+        '''
+        if not self.verbose or self._zero_den_warned:
+            return
+        print('warning: M=%.2e has zero number density at z=%.2f, <%s> returns zero '
+              'for that mass bin (further messages suppressed).' % (mass, z, caller))
+        self._zero_den_warned = True
 
     def _get_hmf_gp(self, massdef):
         '''Return the gp object backing a mass definition.'''
@@ -1616,8 +1654,28 @@ class HMF_CEmulator(CBaseEmulator):
         return bias[:,::-1]
     
     def get_mass_from_lgden(self, z=None, lgden=None, massdef="RockstarM200m"):
+        '''
+        Get the mass threshold for a given log10 number density threshold.
+
+        Args:
+            z      : float or array-like, redshift
+            lgden  : float or array-like, log10 of the number density [Mpc/h]^-3,
+                     must be strictly increasing
+            massdef : string, the mass definition used in the emulator
+        '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         lgden = np.atleast_1d(lgden)
+        if lgden.size > 1 and np.any(np.diff(lgden) <= 0):
+            raise ValueError(
+                'lgden must be strictly increasing, got %s. The cumulative number '
+                'density falls as the mass threshold rises, so callers that build '
+                'lgden from an ascending M grid must reverse it first.' % (lgden,))
+        # the tabulated grid spans [-8, -1]; outside it the spline extrapolates
+        if (np.any(lgden < -8) or np.any(lgden > -1)) and not self._lgden_warned:
+            warnings.warn('lgden %s is outside the tabulated range [-8, -1]; the mass '
+                          'threshold is extrapolated there (reported once).' % (lgden,),
+                          UserWarning)
+            self._lgden_warned = True
         interp_func = self._get_mass_from_lgden_interp(massdef)
         return interp_func(z, lgden)
     
@@ -1679,7 +1737,7 @@ class HMF_CEmulator(CBaseEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_bias_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_bias_mass', im, z[iz])
             bias1p = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1p)[0] * pbs1p[iz,valid]
             bias1m = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1m)[0] * pbs1m[iz,valid]
             ok     = self._fd_ok(den1p_valid, den1m_valid)
@@ -1797,7 +1855,7 @@ class Pkhm_CEmulator(HMF_CEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_pkhm_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_pkhm_mass', im, z[iz])
             pkhm1p = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1p, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
             pkhm1m = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1m, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
             ok     = self._fd_ok(den1p_valid, den1m_valid)
@@ -1941,7 +1999,7 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_xihm_mass', im, z[iz])
             xihm1p = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1p)[:,0] * ximm_emu[iz][None,:]
             xihm1m = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1m)[:,0] * ximm_emu[iz][None,:] # len(M), len(r) squeeze the z dimension
             ok     = self._fd_ok(den1p_valid, den1m_valid)
@@ -2105,12 +2163,10 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
             lgden1m = np.log10(den1m[iz,valid1])
             lgden2p = np.log10(den2p[iz,valid2])
             lgden2m = np.log10(den2m[iz,valid2])
-            if self.verbose and not np.all(valid1):
-                for im in M1[~valid1]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
-            if self.verbose and not np.all(valid2):
-                for im in M2[~valid2]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
+            for im in M1[~valid1]:
+                self._warn_zero_density('get_xihh_mass(M1)', im, z[iz])
+            for im in M2[~valid2]:
+                self._warn_zero_density('get_xihh_mass(M2)', im, z[iz])
              
             xihhpp = self.Xihh.get_xihh(z=z[iz], r=r, lgden1=lgden1p, lgden2=lgden2p)[:,:,0]
             xihhmm = self.Xihh.get_xihh(z=z[iz], r=r, lgden1=lgden1m, lgden2=lgden2m)[:,:,0]

@@ -36,16 +36,19 @@ class CEmulatorFallbackError(RuntimeError):
 def check_z(zlists=zlists,z=None, verbose=False):
     if z is None:
         z = zlists[::-1]
-        print('No redshift input, using default redshifts [0,3]-12.')
+        if verbose:
+            print('No redshift input, using default redshifts [0,3]-12.')
     zinput = np.atleast_1d(np.copy(z))
     if np.any(zinput < np.min(zlists)) and verbose:
         warnings.warn('Redshift z is smaller than the lower limit %.2f.'%np.min(zlists))
     if np.any(zinput > np.max(zlists)) and verbose:
         warnings.warn('Redshift z is larger than the upper limit %.2f.'%np.max(zlists))
-    if (not np.all(np.diff(zinput) > 0.0))  and verbose:
-        # zinput.sort()
-        # print('Predicting redshifts (sorted):', zinput)
-        warnings.warn("Redshift must be increasing!")
+    if zinput.size > 1 and not np.all(np.diff(zinput) > 0.0):
+        # a descending z only surfaces later as scipy's "x must be strictly
+        # increasing when grid is True", which points at nothing
+        raise ValueError('Redshift must be strictly increasing, got %s. The emulator '
+                         'snapshots are stored in descending order, so any z derived '
+                         'from zlists must be reversed first.' % (zinput,))
     return zinput
     
 def checkdata(dlists, d=None, dname='wavenumber', verbose=False):

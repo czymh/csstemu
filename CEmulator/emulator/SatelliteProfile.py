@@ -101,6 +101,7 @@ class SatelliteProfile:
         self.Rc = Rc
         self.apodization_scale = apodization_scale
         self.concentration = concentration_model or concentration_duffy08
+        self._krange_warned = False
 
     def R200(self, M, z):
         """R_200m in Mpc/h for halo mass *M* at redshift *z*."""
@@ -323,12 +324,14 @@ class SatelliteProfile:
 
             # Warn if k_target outside FFTLog range
             if k_target.min() < k_fft.min() or k_target.max() > k_fft.max():
-                warnings.warn(
-                    f"compute_p_hm_dist_emu: target k range "
-                    f"[{k_target.min():.3g}, {k_target.max():.3g}] "
-                    f"exceeds FFTLog range "
-                    f"[{k_fft.min():.3g}, {k_fft.max():.3g}]. "
-                    "Extrapolating with fill_value=0.")
+                # a per-mass f-string would add one __warningregistry__ entry per
+                # mass bin, which grows without bound in an MCMC chain
+                if not self._krange_warned:
+                    warnings.warn(
+                        'compute_p_hm_dist_emu: the target k range exceeds the FFTLog '
+                        'range for some mass bins; those are extrapolated with '
+                        'fill_value=0 (reported once).', UserWarning)
+                    self._krange_warned = True
             p_hm_tmp[im] = pk_tmp
             # Apply apodization
             if apodization_scale is not None:
