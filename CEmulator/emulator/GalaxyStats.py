@@ -919,16 +919,6 @@ class GalaxyStatsCalculator:
 
         return result  # (n_z, n_mass, n_k)
 
-    @staticmethod
-    def _cache_matches(cached, new):
-        """Check if cached array matches new array for cache invalidation."""
-        if cached is None:
-            return False
-        try:
-            return len(cached) == len(new) and np.allclose(cached, new)
-        except (TypeError, ValueError):
-            return False
-
     def compute_Xigm(self, r, z, hod_model, **hod_params):
         r"""
         Compute the galaxy-matter correlation function xi_{gm}(r).
@@ -1135,8 +1125,8 @@ class GalaxyStatsCalculator:
         k_key = np.atleast_1d(k)
         if self._uk_grid_cache is not None:
             cached_z, cached_k, cached_M, cached_uk = self._uk_grid_cache
-            if self._cache_matches(cached_z, z) and self._cache_matches(cached_k, k_key) and\
-                self.cache_matches(cached_M, M_key):
+            if self._cache_matches(cached_z, z_key) and self._cache_matches(cached_k, k_key) and\
+                self._cache_matches(cached_M, M_key):
                 return cached_uk
         uk = self._get_satellite_uk_grid(k_key, M_key, z_key)
         self._uk_grid_cache = (z_key.copy(), k_key.copy(), M_key.copy() ,uk)

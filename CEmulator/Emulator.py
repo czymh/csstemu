@@ -1711,12 +1711,14 @@ class Pkhm_CEmulator(HMF_CEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M  = np.atleast_1d(M)
-        lgdens = np.log10(self.get_Nhalo(z=z, M=M, massdef=massdef)) # len(z), len(M)
+        # get_Nhalo is cumulative so lgden decreases with M; reverse to satisfy
+        # the ascending-lgden contract of get_pkhm_lgnbar_threshold, then undo.
+        lgdens = np.log10(self.get_Nhalo(z=z, M=M, massdef=massdef))[:,::-1] # len(z), len(M)
         pkhm   = np.zeros((len(M), len(z), len(k))) 
         for iz in range(len(z)):
             # len(M), len(k) squeeze the z dimension
             pkhm[:,iz] = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgdens[iz,:], massdef=massdef, Pcb=Pcb)[:,0,:] 
-        return pkhm # len(M), len(z), len(k)
+        return pkhm[::-1,:,:] # len(M), len(z), len(k), invert M order to match input order
     
     def get_pkhm_mass(self, z=None, k=None, M=None, massdef='RockstarM200m', Pcb=True):
         '''
@@ -1779,7 +1781,7 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
         super()._sync_cosmologies()
         self.BrhmRockstarM200m.ncosmo = self.ncosmo
         # clear cache
-        self.BkhmRockstarM200m._Brhm_interp = None
+        self.BrhmRockstarM200m._Brhm_interp = None
     
     def _get_xihm_lgnbar_threshold_tree(self, z=None, r=None, lgden=None, massdef='RockstarM200m', Pcb=True):
         '''
@@ -2379,7 +2381,16 @@ class GalaxyEmulator(Xihm_CEmulator):
     def _sync_cosmologies(self):
         """Sync all sub-emulator cosmologies and clear galaxy caches."""
         super()._sync_cosmologies()
+        if self._xihh_emu is not None:
+            self._xihh_emu.cosmologies = self.cosmologies
+            self._xihh_emu.Cosmo       = self.Cosmo
+            self._xihh_emu._sync_cosmologies()
         if self._galaxy_calc is not None:
+            # Omegam is the cb component and is frozen into SatelliteProfile at
+            # construction, so refresh both before the grids are rebuilt.
+            _om = getattr(self.Cosmo, 'Omegam', 0.315)
+            self._galaxy_calc.Omegam = _om
+            self._galaxy_calc.satellite_profile.Omegam = _om
             self._galaxy_calc.clear_cosmology_cache()
 
     @property
