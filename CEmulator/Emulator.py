@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpol
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
-from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
+from .emulator.Bkcb import Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
 from .emulator.HMF import HMFRockstarM200m_gp, HMFFoFM200m_gp, HMFFoFM200c_gp, HMFRockstarMvir_gp, HMFRockstarMvir_bound_gp
@@ -639,7 +639,6 @@ class Pkmm_CEmulator(CBaseEmulator):
             verbose : bool, whether to output the running information
         '''
         super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
-        self.Bkcb            = Bkcb_gp(verbose=verbose) 
         self.Bkcb_halofit    = Bkcb_halofit_gp(verbose=verbose) 
         self.Bkcb_lin2hmcode = Bkcb_lin2hmcode_gp(verbose=verbose)
         self.Bkcb_hmcode2020 = Bkcb_hmcode2020_gp(verbose=verbose)
@@ -657,7 +656,6 @@ class Pkmm_CEmulator(CBaseEmulator):
         ''' 
         super()._sync_cosmologies()
         ##### pass the cosmologies (normalized) to other class
-        self.Bkcb.ncosmo            = self.ncosmo
         self.Bkcb_halofit.ncosmo    = self.ncosmo
         self.Bkcb_lin2hmcode.ncosmo = self.ncosmo
         self.Bkcb_hmcode2020.ncosmo = self.ncosmo
@@ -854,10 +852,9 @@ class Pkmm_CEmulator(CBaseEmulator):
         Get the nonlinear power spectrum.
         
         .. note::
-           For now, nltype = 'hmcode2020', 'halofit' can give a better result than nltype = 'linear'.
+           nltype = 'hmcode2020' or 'halofit' select the nonlinear ratio model.
            For nltype = 'halofit' or 'hmcode2020', we only use the 'Emulator' method to generate the halofit Pk for consistency between trainning and output data.
            The lintype only determine which method to generate the neutrino linear Pk.
-           For nltype = 'linear', lintype determine which method to generate the linear cb and mm Pk.
            Because the agreements of linear Pk between CAMB, CLASS and Emulator is better than 0.5%.
         
         Args:
@@ -865,7 +862,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             k           : float or array-like, wavenumber [h/Mpc]. 
             Pcb         : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True).
             lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. Default is 'Emulator'.
-            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.  means ratio of nonlinear to **nltype** power spectrum. Default is 'hmcode2020'.
+            nltype      : string, 'halofit' or 'hmcode2020'.  means ratio of nonlinear to **nltype** power spectrum. Default is 'hmcode2020'.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return:
@@ -889,26 +886,21 @@ class Pkmm_CEmulator(CBaseEmulator):
                 pknl = self.Tkmmhmcode2020.get_Tkmmhmcode2020(z=z, k=k) * pknl
             return pknl
 
-        k = checkdata(self.Bkcb.klist, k, dname='wavenumber', verbose=self.verbose)
+        k = checkdata(self.Bkcb_hmcode2020.klist, k, dname='wavenumber', verbose=self.verbose)
         if np.any(k > 10.0):
             self._warn_extrap('k', 'k=%s extends beyond the trained 10 h/Mpc; the nonlinear '
                                    'ratio is extrapolated in log-log (reported once).'
                               % (np.max(k),))
         ## get the nonlinear transfer for Pcb
-        if   nltype == 'linear':
-            Bkpred = self.Bkcb.get_Bk(z, k)
-        elif nltype == 'halofit':
+        if nltype == 'halofit':
             Bkpred = self.Bkcb_halofit.get_Bk(z, k)
         elif nltype == 'hmcode2020':
             Bkpred = self.Bkcb_hmcode2020.get_Bk(z, k)
         else:
-            raise ValueError("nltype %r not supported yet; use 'linear', 'halofit' "
-                             "or 'hmcode2020'." % (nltype,))
+            raise ValueError("nltype %r not supported yet; use 'halofit' or "
+                             "'hmcode2020'." % (nltype,))
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
-            if   nltype == 'linear':
-                ## get the linear power spectrum for cb
-                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
-            elif nltype == 'halofit':
+            if nltype == 'halofit':
                 ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                 ## get the halofit power spectrum for cb
                 pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
@@ -927,11 +919,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
             fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM    
             if lintype == 'CLASS':
-                if nltype == 'linear':
-                    if (cosmo_class is None):
-                        cosmo_class = self._get_cosmo_class_cache()
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
-                elif nltype == 'halofit':
+                if nltype == 'halofit':
                     if (cosmo_class is None):
                         cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
@@ -957,11 +945,7 @@ class Pkmm_CEmulator(CBaseEmulator):
                 else:
                     raise ValueError('This should not happen!')
             elif lintype == 'CAMB':
-                if nltype == 'linear':
-                    if (camb_results is None):
-                        camb_results = self.get_camb_results(z, non_linear=None)
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results, neutrino_mass_split='single')
-                elif nltype == 'halofit':
+                if nltype == 'halofit':
                     if (camb_results is None):
                         # halofit below is always taken from the emulator, so what
                         # we need here is the CAMB object for the neutrino term
@@ -980,9 +964,7 @@ class Pkmm_CEmulator(CBaseEmulator):
                     pknunulin = pkfunc.P(z, k)
                     pknl      = fcb2M*fcb2M*pkcbnl + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl*pknunulin) 
             elif lintype == 'Emulator':
-                if nltype == 'linear':
-                    pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, neutrino_mass_split='single')
-                elif nltype == 'halofit':
+                if nltype == 'halofit':
                     pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
                     pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
@@ -1023,7 +1005,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             k           : float or array-like, wavenumber [h/Mpc].
             Pcb         : bool, whether to output the cb power spectrum (if True)
                           or the total power spectrum (if False [default]).
-            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.
+            nltype      : string, 'halofit' or 'hmcode2020'.
                           The reference power spectrum for the nonlinear ratio.
                           Default is 'hmcode2020'.
         Return:

@@ -118,6 +118,17 @@ finally:
     g.xihm.BrhmRockstarM200m.get_Brhm = orig
 
 print()
+print('[6] nltype scope after the linear branch was removed')
+
+expect("nltype='linear' is rejected with a clear message",
+       lambda: pk.get_pknl(z=0.0, k=K, nltype='linear'),
+       ValueError, 'linear')
+check('the trimmed emulator no longer builds a Bkcb object', not hasattr(pk, 'Bkcb'))
+for nl in ('hmcode2020', 'halofit'):
+    out = pk.get_pknl(z=0.0, k=K, nltype=nl)
+    check("nltype=%r still works" % nl, np.all(np.isfinite(out)))
+
+print()
 if _FAIL:
     print('FAIL: %d check(s) failed' % len(_FAIL))
     sys.exit(1)

@@ -128,7 +128,7 @@ def probes_pkmm(e):
         for ty in ('Emulator', 'CLASS', 'CAMB'):
             c.add('get_pklin[%s,%s]' % (tag, ty), e.get_pklin,
                   z=Z_ALL, k=K_LIN, Pcb=Pcb, type=ty)
-    for nl in ('hmcode2020', 'halofit', 'linear'):
+    for nl in ('hmcode2020', 'halofit'):
         c.add("get_pknl[nltype='%s']" % nl, e.get_pknl, z=Z_ALL, k=K_NL, Pcb=True, nltype=nl)
         c.add("get_pknl_extrp[nltype='%s']" % nl, e.get_pknl_extrp,
               z=Z_ALL, k=K_NL, Pcb=True, nltype=nl)

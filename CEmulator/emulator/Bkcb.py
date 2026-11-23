@@ -77,25 +77,6 @@ class Bkcbbase_gp:
         Bkout  = spline(z, k)
         return Bkout 
 
-class Bkcb_gp(Bkcbbase_gp):
-    def __init__(self, verbose=False):
-        self.verbose       = verbose
-        self.emunamestr    = 'Bk_lin'
-        self.n_sample      = 129
-        self.nvec          = 20
-        self.NormBeforeGP  = True
-        self.kmax100       = False
-        self._load_data()
-        
-    def get_Bk(self, z=None, k=None):
-        '''
-        Get the matter power spectrum B(k) [Mpc/h]^3 at redshift z and wavenumber k.
-        Bk is defined as the ratio between nonlinear and linear power spectrum.
-        z : float or array-like, redshift
-        k : float or array-like, wavenumber [h/Mpc]
-        '''
-        return super().get_data(z=z, k=k) 
-
 class Bkcb_halofit_gp(Bkcbbase_gp):
     def __init__(self, verbose=False):
         self.verbose       = verbose
