@@ -1157,7 +1157,7 @@ class HMF_CEmulator(CBaseEmulator):
         self.HMFRockstarMvirb = HMFRockstarMvir_bound_gp(verbose=verbose)
         self.bhmRockstarM200m = bhmRockstarM200m_gp (verbose=verbose)
         self._mass_from_lgden_interp_cache = {}
-        self._interp_cache = {}   # key: (massdef, diff), value: spline callable
+        self._interp_cache = {}   # key: (massdef, diff), value: (spline callable, addnum)
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
@@ -1270,21 +1270,23 @@ class HMF_CEmulator(CBaseEmulator):
             # for numerical differentiation, we use a smaller step than the one for interpolation to get a smoother result.
             dlgM_s = 1e-3 
             dlnM_s = dlgM_s * np.log(10)
-            addnum = 1 - np.min(ypred_)
+            fdoff = 1 - np.min(ypred_)
             ypred_new = np.zeros_like(ypred_)
             for iz in range(len(self.zlists)):
-                Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+addnum), kind='cubic', fill_value='extrapolate')
-                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_s/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_s/2)+addnum) / dlnM_s 
-            self.addnum = 1 - np.min(ypred_new)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
-                                                         np.log10(ypred_new[::-1,:]+self.addnum), kx=1, ky=1)(z, np.log10(M))
+                Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+fdoff), kind='cubic', fill_value='extrapolate')
+                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_s/2)-fdoff - 10**Nfunc(np.log10(mcen_l)+dlgM_s/2)+fdoff) / dlnM_s 
+            addnum = 1 - np.min(ypred_new)
+            # addnum is bound as a default argument so the cached spline cannot
+            # pick up the offset belonging to a different massdef.
+            spline = lambda z, M, _a=addnum: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
+                                                                     np.log10(ypred_new[::-1,:]+_a), kx=1, ky=1)(z, np.log10(M))
         else:
-            self.addnum = 1 - np.min(ypred_)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
-                                                         np.log10(ypred_[::-1,:]+self.addnum), kx=1, ky=3)(z, np.log10(M))
+            addnum = 1 - np.min(ypred_)
+            spline = lambda z, M, _a=addnum: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
+                                                                     np.log10(ypred_[::-1,:]+_a), kx=1, ky=3)(z, np.log10(M))
         # Save the spline function to the cache
-        self._interp_cache[cache_key] = spline
-        return spline
+        self._interp_cache[cache_key] = (spline, addnum)
+        return spline, addnum
     
     def _get_massdef_Delta(self, z, Pcb=True, Delta=200, rho_type='matter'):
         if Pcb:
@@ -1500,7 +1502,8 @@ class HMF_CEmulator(CBaseEmulator):
             ypred_ = self.HMFRockstarMvirb.get_data()
         else:
             raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        cumhmf = self._2d_interp(ypred_, massdef=massdef)(z=z, M=M) - self.addnum
+        spline, addnum = self._2d_interp(ypred_, massdef=massdef)
+        cumhmf = spline(z=z, M=M) - addnum
         return cumhmf * V * 1e-9
 
     def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
@@ -1528,7 +1531,8 @@ class HMF_CEmulator(CBaseEmulator):
             ypred_ = self.HMFRockstarMvirb.get_data()
         else:
             raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        dndlnM = self._2d_interp(ypred_, diff=True, massdef=massdef)(z=z, M=M) - self.addnum
+        spline, addnum = self._2d_interp(ypred_, diff=True, massdef=massdef)
+        dndlnM = spline(z=z, M=M) - addnum
         return dndlnM * 1e-9
 
     def get_bias_Castro23(self, z=None, M=None, Pcb=True, revisted=True, massdef='RockstarMvir'):
