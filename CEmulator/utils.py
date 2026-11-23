@@ -238,29 +238,28 @@ def compute_Rsigma_neff_C(Pklin):
     abstol = 1e-4
     xlogr1 = -2.0
     xlogr2 = 3.5
-    while True:
+    for _ in range(200):
         rmid = (xlogr2 + xlogr1) / 2.0
         rmid = 10 ** rmid
         sig, d1, d2 = WinInt(Pklin, rmid)
+        rneff = -3 - d1
+        rncur = -d2
         diff = sig - 1.0
         if abs(diff) <= abstol:
-            rknl = 1. / rmid
-            rneff = -3 - d1
-            rncur = -d2
             break
         elif diff >  abstol:
             xlogr1 = np.log10(rmid)
-        elif diff < -abstol:
+        else:
             xlogr2 = np.log10(rmid)
         if xlogr2 < -1.9999:
-            # is still linear, exit
+            # is still linear, exit with the last evaluation
             break
         elif xlogr1 > 3.4999:
             # Totally crazy non-linear
-            raise ValueError('Error in halofit')
-    neff = rneff
-    Curv = rncur
-    return rmid, neff, Curv
+            raise ValueError('Error in halofit: no linear scale with sigma(R) = 1.')
+    else:
+        raise ValueError('Error in halofit: the sigma(R) = 1 bisection did not converge.')
+    return rmid, rneff, rncur
 
 def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alphan, betan, mun, nun, h0):
     y = k * R_sigma

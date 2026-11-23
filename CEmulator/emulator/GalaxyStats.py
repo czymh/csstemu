@@ -548,7 +548,14 @@ class GalaxyStatsCalculator:
                 xi_p = xi_p * xi_mm[None, :]
                 xi_m = xi_m * xi_mm[None, :]
                 dden = den_p - den_m
-                xi_gp = (xi_p * den_p[:, None] - xi_m * den_m[:, None]) / dden[:, None]
+                ok   = self.hmf._fd_ok(den_p, den_m)
+                # fall back to the tree model on the same mass nodes; xi_tree is
+                # on M_arr, a different grid from these nodes
+                tree = biases_interp[iz][::-1][:, None] * xi_mm[None, :]
+                xi_gp = np.where(
+                    ok[:, None],
+                    (xi_p * den_p[:, None] - xi_m * den_m[:, None]) / np.where(ok, dden, 1.0)[:, None],
+                    tree[valid])
                 xi_gp = xi_gp[::-1,:]  # reverse back to match mass_nodes order
                 # (G, n_r)
                 interp = interp1d(np.log(mass_nodes[iz]), xi_gp, kind='linear', axis=0,
@@ -604,7 +611,11 @@ class GalaxyStatsCalculator:
                     pk_m = np.squeeze(self.xihm.get_pkhm_lgnbar_threshold(
                         z=z_key[iz], k=k_key, lgden=lgden_m, massdef=self.mass_def))[valid,:]
                     dden = den_p - den_m
-                    pk_nodes = (pk_p * den_p[:, None] - pk_m * den_m[:, None]) / dden[:, None]
+                    ok   = self.hmf._fd_ok(den_p, den_m)
+                    pk_nodes = np.where(
+                        ok[:, None],
+                        (pk_p * den_p[:, None] - pk_m * den_m[:, None]) / np.where(ok, dden, 1.0)[:, None],
+                        pk_p)
                     # G, n_k
                     pk_nodes = pk_nodes[::-1]  # reverse back to match mass_nodes order
                     interp = interp1d(np.log(mass_nodes[iz]), pk_nodes, kind='linear', axis=0,
@@ -666,7 +677,14 @@ class GalaxyStatsCalculator:
                 numer = (xipp * dpp[:, :, None] + ximm * dmm[:, :, None]
                       - xipm * dpm[:, :, None] - ximp * dmp[:, :, None])
                 denom = dpp + dmm - dpm - dmp
-                xi_gp = numer / denom[:, :, None]
+                okm   = self.hmf._fd_ok(den_p, den_m)
+                okm   = okm[:, None] & okm[None, :]
+                # tree model on these mass nodes; xi_tree is on M_arr
+                bnodes = biases_interp[iz][::-1]
+                tree_nodes = bnodes[:, None, None] * bnodes[None, :, None] * xi_mm[None, None, :]
+                xi_gp = np.where(
+                    okm[:, :, None], numer / np.where(okm, denom, 1.0)[:, :, None],
+                    tree_nodes[np.ix_(valid, valid)])
                 xi_gp = xi_gp[::-1, ::-1, :]  # reverse to match mass_nodes order
             else:
                 xi_gp = np.asarray(self.xihh.get_xihh_mass(

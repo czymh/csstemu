@@ -12,6 +12,29 @@ _F_INTERPOLATOR = interp1d(_Y_GRID, _F_GRID, kind='cubic', bounds_error=False,
 _F_PRIME_INTERPOLATOR = interp1d(_Y_GRID, _F_PRIME_GRID, kind='cubic',
                                   bounds_error=False, fill_value=(0.0, float('inf')))
 
+_F_Y_MAX  = float(_Y_GRID[-1])
+_F_EDGE   = float(_F_GRID[-1])
+_FP_EDGE  = float(_F_PRIME_GRID[-1])
+
+
+def _fermi_F(y):
+    '''F(y), continued linearly past the table instead of returning inf.
+
+    F' saturates at the top of the table, so F keeps growing almost linearly;
+    returning inf there would silently poison Ez for m_nu beyond the emulator
+    range, which is exactly where an MCMC proposal lives.
+    '''
+    y = np.asarray(y, dtype=float)
+    out = _F_INTERPOLATOR(y)
+    over = y > _F_Y_MAX
+    return np.where(over, _F_EDGE + _FP_EDGE * (y - _F_Y_MAX), out)
+
+
+def _fermi_Fp(y):
+    '''F'(y), held at its saturated value past the table.'''
+    y = np.asarray(y, dtype=float)
+    return np.where(y > _F_Y_MAX, _FP_EDGE, _F_PRIME_INTERPOLATOR(y))
+
 # Critical density at z=0 in h^2 Msun / Mpc^3
 RHO_CRIT_0 = 2.77536627e11
 
@@ -103,9 +126,9 @@ class Cosmology:
             The value of F(y) or F'(y)
         '''
         if Fid == 0:
-            return float(_F_INTERPOLATOR(float(y)))
+            return float(_fermi_F(y))
         elif Fid == 1:
-            return float(_F_PRIME_INTERPOLATOR(float(y)))
+            return float(_fermi_Fp(y))
         else:
             raise ValueError("Fid must be 0 or 1.")
         
@@ -116,7 +139,7 @@ class Cosmology:
         if self.mnu != 0.0:
             y_vals = self.mnus[None,:] / (1+z[:,None]) / self.kB / T_nu
             # F_sumNu = np.asarray([self._F_y(y, Fid=0) for y in y_vals])
-            F_sumNu = np.sum(_F_INTERPOLATOR(y_vals), axis=1)   # one time interpolation for all y values
+            F_sumNu = np.sum(_fermi_F(y_vals), axis=1)   # one time interpolation for all y values
         else:
             F_sumNu = 0
         return fac * F_sumNu

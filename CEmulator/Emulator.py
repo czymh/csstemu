@@ -1190,6 +1190,13 @@ class HMF_CEmulator(CBaseEmulator):
     '''
     The halo mass function emulator class.
     '''
+    _HMF_ATTRS = {'RockstarM200m': 'HMFRockstarM200m',
+                  'FoFM200c': 'HMFFoFM200c',
+                  'FoFM200m': 'HMFFoFM200m',
+                  'RockstarMvir': 'HMFRockstarMvir',
+                  'RockstarMvir_bound': 'HMFRockstarMvirb'}
+    _fd_eps = 1e-3 # a 1% mass step must move n(>M) by more than this fraction
+
     def __init__(self, verbose=False, neutrino_mass_split='single'):
         '''
         Initialize the halo mass function emulator class.
@@ -1206,6 +1213,7 @@ class HMF_CEmulator(CBaseEmulator):
         self.bhmRockstarM200m = bhmRockstarM200m_gp (verbose=verbose)
         self._mass_from_lgden_interp_cache = {}
         self._interp_cache = {}   # key: (massdef, diff), value: (spline callable, addnum)
+        self._fd_warned = False
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
@@ -1258,45 +1266,48 @@ class HMF_CEmulator(CBaseEmulator):
         self._mass_from_lgden_interp_cache[massdef] = interpolator
         return interpolator
     
-    def _2d_interp(self, ypred, diff=False, massdef='RockstarM200m'):
+    def _fd_ok(self, den_p, den_m):
+        '''
+        Mask of mass bins where the +-1% finite difference keeps enough
+        significant digits.
+
+        n(>M) barely changes over the step beyond the exponential cutoff, so
+        the difference of two nearly equal numbers is dominated by interpolation
+        noise and dividing by it turns a tiny error into inf/NaN.
+        '''
+        ok = (den_m - den_p) > self._fd_eps * den_m
+        if not np.all(ok) and not self._fd_warned:
+            warnings.warn('Finite difference in halo mass is ill conditioned for '
+                          'some bins (n(>M) barely changes over the 1% step); '
+                          'those bins fall back to the tree/Castro23 value.',
+                          UserWarning)
+            self._fd_warned = True
+        return ok
+
+    def _get_hmf_gp(self, massdef):
+        '''Return the gp object backing a mass definition.'''
+        try:
+            return getattr(self, self._HMF_ATTRS[massdef])
+        except KeyError:
+            raise ValueError('Mass definition %s is not supported. For now only support [%s].'
+                             % (massdef, ', '.join(self._HMF_ATTRS)))
+
+    def _2d_interp(self, ypred=None, diff=False, massdef='RockstarM200m'):
         '''
         2D interpolation for the cumlative halo mass function.
+
+        ``ypred`` may be omitted: it is only needed on a cache miss, and
+        computing it means 10 GP predictions, so the hit path stays cheap.
         '''
         cache_key = (massdef, diff)
         if cache_key in self._interp_cache:
             return self._interp_cache[cache_key]
-        if massdef == 'RockstarM200m':
-            Delta = 200
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarM200m.mhmin_ind
-            mhmax_ind = self.HMFRockstarM200m.mhmax_ind
-            m_edges   = self.HMFRockstarM200m.m_edges
-        elif massdef == 'FoFM200c':
-            Delta = 200
-            rho_type = 'critical'
-            mhmin_ind = self.HMFFoFM200c.mhmin_ind
-            mhmax_ind = self.HMFFoFM200c.mhmax_ind
-            m_edges   = self.HMFFoFM200c.m_edges
-        elif massdef == 'FoFM200m':
-            Delta = 200
-            rho_type = 'matter'
-            mhmin_ind = self.HMFFoFM200m.mhmin_ind
-            mhmax_ind = self.HMFFoFM200m.mhmax_ind
-            m_edges   = self.HMFFoFM200m.m_edges
-        elif massdef == 'RockstarMvir':
-            Delta = "vir"
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarMvir.mhmin_ind
-            mhmax_ind = self.HMFRockstarMvir.mhmax_ind
-            m_edges   = self.HMFRockstarMvir.m_edges
-        elif massdef == 'RockstarMvir_bound':
-            Delta = "vir"
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarMvirb.mhmin_ind
-            mhmax_ind = self.HMFRockstarMvirb.mhmax_ind
-            m_edges   = self.HMFRockstarMvirb.m_edges
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
+        hmfobj = self._get_hmf_gp(massdef)
+        if ypred is None:
+            ypred = hmfobj.get_data()
+        mhmin_ind = hmfobj.mhmin_ind
+        mhmax_ind = hmfobj.mhmax_ind
+        m_edges   = hmfobj.m_edges
         m_edges_l = np.logspace(10, 17, 140+1)
         mcen_l    = 10**((np.log10(m_edges_l[1:]) + np.log10(m_edges_l[:-1]))/2)
         dlgM_l    = np.log10(m_edges_l[1]) - np.log10(m_edges_l[0])
@@ -1324,15 +1335,14 @@ class HMF_CEmulator(CBaseEmulator):
                 Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+fdoff), kind='cubic', fill_value='extrapolate')
                 ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_s/2)-fdoff - 10**Nfunc(np.log10(mcen_l)+dlgM_s/2)+fdoff) / dlnM_s 
             addnum = 1 - np.min(ypred_new)
-            # addnum is bound as a default argument so the cached spline cannot
-            # pick up the offset belonging to a different massdef.
-            spline = lambda z, M, _a=addnum: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
-                                                                     np.log10(ypred_new[::-1,:]+_a), kx=1, ky=1)(z, np.log10(M))
+            rbs = RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l),
+                                      np.log10(ypred_new[::-1,:]+addnum), kx=1, ky=1)
         else:
             addnum = 1 - np.min(ypred_)
-            spline = lambda z, M, _a=addnum: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
-                                                                     np.log10(ypred_[::-1,:]+_a), kx=1, ky=3)(z, np.log10(M))
-        # Save the spline function to the cache
+            rbs = RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]),
+                                      np.log10(ypred_[::-1,:]+addnum), kx=1, ky=3)
+        # the spline is built once here; a cache hit must not re-fit it
+        spline = lambda z, M, _rbs=rbs: 10**_rbs(z, np.log10(M))
         self._interp_cache[cache_key] = (spline, addnum)
         return spline, addnum
     
@@ -1538,19 +1548,7 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M = np.atleast_1d(M)
-        if massdef == 'RockstarM200m':
-            ypred_ = self.HMFRockstarM200m.get_data()
-        elif massdef == 'FoFM200c':
-            ypred_ = self.HMFFoFM200c.get_data()
-        elif massdef == 'FoFM200m':
-            ypred_ = self.HMFFoFM200m.get_data()    
-        elif massdef == 'RockstarMvir':
-            ypred_ = self.HMFRockstarMvir.get_data()
-        elif massdef == 'RockstarMvir_bound':
-            ypred_ = self.HMFRockstarMvirb.get_data()
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        spline, addnum = self._2d_interp(ypred_, massdef=massdef)
+        spline, addnum = self._2d_interp(massdef=massdef)
         cumhmf = spline(z=z, M=M) - addnum
         return cumhmf * V * 1e-9
 
@@ -1567,19 +1565,7 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M = np.atleast_1d(M)
-        if massdef == 'RockstarM200m':
-            ypred_ = self.HMFRockstarM200m.get_data()
-        elif massdef == 'FoFM200c':
-            ypred_ = self.HMFFoFM200c.get_data()
-        elif massdef == 'FoFM200m':
-            ypred_ = self.HMFFoFM200m.get_data()
-        elif massdef == 'RockstarMvir':
-            ypred_ = self.HMFRockstarMvir.get_data()
-        elif massdef == 'RockstarMvir_bound':
-            ypred_ = self.HMFRockstarMvirb.get_data()
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        spline, addnum = self._2d_interp(ypred_, diff=True, massdef=massdef)
+        spline, addnum = self._2d_interp(diff=True, massdef=massdef)
         dndlnM = spline(z=z, M=M) - addnum
         return dndlnM * 1e-9
 
@@ -1696,7 +1682,11 @@ class HMF_CEmulator(CBaseEmulator):
                     print("warning: M=%.2e get zero number density at z=%.2f, <get_bias_mass> return zero for this mass bin."%(im, z[iz]))
             bias1p = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1p)[0] * pbs1p[iz,valid]
             bias1m = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1m)[0] * pbs1m[iz,valid]
-            out[iz,valid] = (bias1p * den1p_valid - bias1m * den1m_valid) / (den1p_valid - den1m_valid)
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_diff = np.where(ok, den1p_valid - den1m_valid, 1.0)
+            out[iz,valid] = np.where(ok,
+                                     (bias1p * den1p_valid - bias1m * den1m_valid) / den_diff,
+                                     pbs1p[iz,valid])
         return out[:,::-1] # invert the order of mass to match the input mass order
             
 ####### class for the matter power spectrum emulator
@@ -1810,7 +1800,12 @@ class Pkhm_CEmulator(HMF_CEmulator):
                     print("warning: M=%.2e get zero number density at z=%.2f, <get_pkhm_mass> return zero for this mass bin."%(im, z[iz]))
             pkhm1p = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1p, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
             pkhm1m = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1m, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
-            out[valid,iz,:] = (pkhm1p * den1p_valid[:,None] - pkhm1m * den1m_valid[:,None]) / (den1p_valid[:,None] - den1m_valid[:,None])
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_p  = den1p_valid[:,None]
+            den_m  = den1m_valid[:,None]
+            numer  = pkhm1p * den_p - pkhm1m * den_m
+            den_diff = np.where(ok[:,None], den_p - den_m, 1.0)
+            out[valid,iz,:] = np.where(ok[:,None], numer / den_diff, pkhm1p)
         return out[::-1,:,:]  # invert M order to match input order
         
            
@@ -1949,7 +1944,13 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
                     print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
             xihm1p = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1p)[:,0] * ximm_emu[iz][None,:]
             xihm1m = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1m)[:,0] * ximm_emu[iz][None,:] # len(M), len(r) squeeze the z dimension
-            xihm_dire[valid,iz] = (xihm1p * den1p_valid[:,None] - xihm1m * den1m_valid[:,None]) / (den1p_valid[:,None] - den1m_valid[:,None])
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_p  = den1p_valid[:,None]
+            den_m  = den1m_valid[:,None]
+            numer  = xihm1p * den_p - xihm1m * den_m
+            den_diff = np.where(ok[:,None], den_p - den_m, 1.0)
+            xihm_dire[valid,iz] = np.where(ok[:,None], numer / den_diff,
+                                           xihm_tree[::-1][valid,iz])
         xihm_dire = xihm_dire[::-1,:,:] # invert the order of mass to match the input mass order
         rswitch   = 40.0 # Mpc/h
         wsmooth   = np.exp(-(r/rswitch)**4)
@@ -2095,6 +2096,8 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
         den2p = (self.get_Nhalo(z=z, M=M2p, massdef=massdef))[:,::-1]   
         den2m = (self.get_Nhalo(z=z, M=M2m, massdef=massdef))[:,::-1]   
         xi_dire = np.zeros((len(M1), len(M2), len(z), len(r)))
+        xi_tree = self._get_xihh_mass_tree(z=z, r=r, M1=M1, M2=M2, massdef=massdef)
+        xi_tree_rev = xi_tree[::-1,::-1,:,:] # same reversed mass order as den1p/den1m
         for iz in range(len(z)):
             valid1  = (den1p[iz] > 0) & (den1m[iz] > 0) 
             valid2  = (den2p[iz] > 0) & (den2m[iz] > 0)
@@ -2120,9 +2123,13 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
             numer  = xihhpp * denpp[:,:,None] + xihhmm * denmm[:,:,None] \
                    - xihhpm * denpm[:,:,None] - xihhmp * denmp[:,:,None] # shape (len(M1), len(M2), len(r))
             denom  = denpp + denmm - denpm - denmp # shape (len(M1), len(M2))
-            xi_dire[:,:,iz][np.ix_(valid1,valid2)] = numer / denom[:,:,None] # shape (len(M1), len(M2), len(r))
+            okm    = self._fd_ok(den1p[iz][valid1], den1m[iz][valid1])[:,None] \
+                   & self._fd_ok(den2p[iz][valid2], den2m[iz][valid2])[None,:]
+            denom_safe = np.where(okm, denom, 1.0)
+            xi_dire[:,:,iz][np.ix_(valid1,valid2)] = np.where(
+                okm[:,:,None], numer / denom_safe[:,:,None],
+                xi_tree_rev[np.ix_(valid1,valid2)][:,:,iz]) # shape (len(M1), len(M2), len(r))
         xi_dire = xi_dire[::-1,::-1,:,:] # back to original order, since den decrease with M increase
-        xi_tree = self._get_xihh_mass_tree(z=z, r=r, M1=M1, M2=M2, massdef=massdef)
         
         rswitch = 40.0 # Mpc/h
         wsmooth = np.exp(-(r/rswitch)**4)[None,None,None,:]
