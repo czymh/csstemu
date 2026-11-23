@@ -52,6 +52,7 @@ class CBaseEmulator:
         self._fallback_mode      = False
         self._fallback_warned    = False
         self._extrap_warned      = set()
+        self._pcalc_cache        = {}   # (kind, z) -> (kcalc, P(k)) for the sigma_R integral
         self._camb_results_cache = None
         self._camb_z_cache       = None
         self._cosmo_class_cache  = None
@@ -252,6 +253,24 @@ class CBaseEmulator:
         warnings.warn(msg, UserWarning)
         self._extrap_warned.add(key)
 
+    def _get_pcalc(self, z, kind='tot'):
+        """Return (kcalc, P(k)) for the sigma_R integral at one redshift.
+
+        get_bias_mass asks for sigma 18 times per call but only a few distinct
+        (z, kind) pairs, and each miss costs 20 GP predictions plus a spline
+        fit, so this memo removes most of that. _sync_cosmologies drops it.
+        """
+        z = float(np.atleast_1d(z)[0])
+        key = (kind, z)
+        if key not in self._pcalc_cache:
+            kcalc = np.logspace(-4.99, 1.99, 1000)
+            if kind == 'cb':
+                pcalc = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
+            else:
+                pcalc = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
+            self._pcalc_cache[key] = (kcalc, pcalc)
+        return self._pcalc_cache[key]
+
     def _sync_cosmologies(self):
         '''
         Sync the cosmologies for all objects with the cosmology class.
@@ -275,6 +294,7 @@ class CBaseEmulator:
         self._camb_results_cache = None
         self._camb_z_cache       = None
         self._cosmo_class_cache  = None
+        self._pcalc_cache        = {}
 
     def _get_cosmo_class_cache(self):
         """Lazy-init CLASS cache. Computed on first use, reused thereafter."""
@@ -479,16 +499,16 @@ class CBaseEmulator:
             sigma = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                             var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 1000)
-            pcalc    = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
+            kcalc, pcalc = self._get_pcalc(z, kind='tot')
+            klog     = np.log(kcalc)
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, klog)) 
             else:
-                sigma = np.zeros(len(R))
-                for iR in range(len(R)):
-                    W_R      = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                kr    = np.asarray(R, dtype=float)[:, None] * kcalc[None, :]
+                W_R   = 3*(np.sin(kr) - kr*np.cos(kr))/kr**3
+                rows  = pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi
+                sigma = np.sqrt(trapz(rows, klog, axis=1))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
@@ -550,16 +570,16 @@ class CBaseEmulator:
             sigma_cb = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                                var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 1000)
-            pcalc    = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
+            kcalc, pcalc = self._get_pcalc(z, kind='cb')
+            klog     = np.log(kcalc)
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, klog)) 
             else:
-                sigma_cb = np.zeros(len(R))
-                for iR in range(len(R)):
-                    W_R          = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma_cb[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                kr       = np.asarray(R, dtype=float)[:, None] * kcalc[None, :]
+                W_R      = 3*(np.sin(kr) - kr*np.cos(kr))/kr**3
+                rows     = pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi
+                sigma_cb = np.sqrt(trapz(rows, klog, axis=1))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
