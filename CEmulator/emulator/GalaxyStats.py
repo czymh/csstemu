@@ -172,13 +172,11 @@ class GalaxyStatsCalculator:
         self._bias_mass_node_cache = None  # tuple: (z, bias_grid)
         self._mass_nodes_cache = None  # tuple: (z, mass_nodes)
 
-        # Precomputed full grids (zlists x M_arr x fftbase.r/k) — Xihm
-        self._xi_hm_full = None  # (n_zPre, n_mass, n_rPre)
-        self._pkhm_full = None   # (n_zPre, n_mass, n_kPre)
-        # Precomputed full grids (zlists x mass_nodes x fftbase.r/k) — Xihh
-        self._xi_hh_full = None  # (n_zPre, G, G, n_rPre)  blended xi_hh on mass nodes
-        self._phh_full = None    # (n_zPre, G, G, n_kPre)  P_hh on mass nodes
-        # Interpolators built from precomputed grids
+        # Precomputed grids, one slab per redshift and built on demand:
+        #   xihm (n_mass, n_r), pkhm (n_mass, n_k),
+        #   xihh (G, G, n_r), phh (G, G, n_k)
+        self._z_slabs = {'xihm': {}, 'pkhm': {}, 'xihh': {}, 'phh': {}}
+        # Interpolators built from the accumulated slabs
         self._xi_hm_interpolator = None
         self._pkhm_interpolator = None
         self._xi_hh_interpolator = None
@@ -186,10 +184,6 @@ class GalaxyStatsCalculator:
         self._z_pre = None       # z grid for interpolation
         if zlists is not None:
             self._z_pre = np.sort(np.asarray(zlists, dtype=float))
-            if self.xihm is not None:
-                self._precompute_xi_hm_pkhm_grids()
-            if self.xihh is not None:
-                self._precompute_xihh_phh_grids()
 
     def clear_cosmology_cache(self):
         """
@@ -210,17 +204,14 @@ class GalaxyStatsCalculator:
         self._xi_mm_cache = None
         self._bias_mass_node_cache = None
         self._mass_nodes_cache = None
-        # Clear interpolators; will be rebuilt by precompute methods
+        # Drop the per-z slabs and the interpolators built from them; they are
+        # rebuilt from the new cosmology the next time a redshift is requested.
+        for kind in self._z_slabs:
+            self._z_slabs[kind].clear()
         self._xi_hm_interpolator = None
         self._pkhm_interpolator = None
         self._xi_hh_interpolator = None
         self._phh_interpolator = None
-        # Recompute full grids with new cosmology
-        if self._z_pre is not None:
-            if self.xihm is not None:
-                self._precompute_xi_hm_pkhm_grids()
-            if self.xihh is not None:
-                self._precompute_xihh_phh_grids()
 
     def _cache_matches(self, cached, target):
         """Check if cached value matches target (both atleast_1d)."""
@@ -525,7 +516,8 @@ class GalaxyStatsCalculator:
         biases_interp = self._get_cached_bias_nodes(z)  # (n_z, G)
         n_z, G = mass_nodes.shape
         n_r = len(r_key)
-        xi_mm_all = self._get_xi_mm(z_key, r_key)
+        # _get_xi_mm squeezes; a single-z call must still give a (n_z, n_r) axis
+        xi_mm_all = np.atleast_2d(self._get_xi_mm(z_key, r_key))
         result = np.zeros((n_z, len(M_arr), n_r))
         for iz in range(n_z):
             biases_iz = interp1d(np.log(mass_nodes[iz]), biases_interp[iz], kind='linear',
@@ -572,10 +564,12 @@ class GalaxyStatsCalculator:
             
         return result
 
-    def _compute_pkhm_on_grid(self, z, k, M_arr):
+    def _compute_pkhm_on_grid(self, z, k, M_arr, xi_hm=None):
         """Internal: compute P_hm(k|M) on a fixed grid via finite differencing.
 
-        No per-call caching. Returns (n_z, n_mass, n_k).
+        When the xi_hm grid for the same redshifts is supplied it is transformed
+        with FFTLog, which is more accurate on small scales than re-differencing.
+        Returns (n_z, n_mass, n_k).
         """
         z_key = np.atleast_1d(z)
         k_key = np.atleast_1d(k)
@@ -584,12 +578,12 @@ class GalaxyStatsCalculator:
         result = np.zeros((n_z, len(M_arr), n_k))
         for iz in range(n_z):
             try:
-                if self._xi_hm_full is not None:
+                if xi_hm is not None:
                     # FFTLog path: more accurate on small scales
                     r = self.fftbase.r
                     G = len(M_arr)
                     for i in range(G):
-                        xi_1d = self._xi_hm_full[iz, i, :]  # nr
+                        xi_1d = xi_hm[iz, i, :]  # nr
                         k_out, P_hm_gp = xi2P(r, xi_1d, l=0, ext=0)
                         interp_pk = interp1d(np.log(k_out), np.real(P_hm_gp),
                                              kind='linear', bounds_error=False,
@@ -708,61 +702,85 @@ class GalaxyStatsCalculator:
             result[iz] = xi_gp * w + xi_tree * (1.0 - w)
         return result  # (n_z, len(M), len(M), n_r)
 
-    def _compute_phh_on_grid(self, z):
-        """Transform precomputed xi_hh_full to P_hh via FFTLog.
+    def _compute_phh_slab(self, z, xi_hh_slab):
+        """Transform one redshift's xi_hh grid to P_hh via FFTLog.
 
-        Uses self._xi_hh_full on self.fftbase.r.
-        Returns (n_zPre, G, G, n_kPre).
+        xi_hh_slab is the (G, G, n_r) output of _compute_xihh_on_grid for this z.
+        Returns (G, G, n_k).
         """
-        z_key = np.atleast_1d(z)
         M_arr = self.M_grid
         r = self.fftbase.r
         k_target = self.fftbase.k
         n_k = len(k_target)
-        n_z = len(z_key)
         G   = len(M_arr)
-        phh = np.zeros((n_z, G, G, n_k))
-        for iz in range(n_z):
-            for i in range(G):
-                for j in range(i, G):
-                    try:
-                        xi_1d = self._xi_hh_full[iz, i, j, :]
-                        k_out, P_hh_gp = xi2P(r, xi_1d, l=0, ext=0, lowring=True)
-                        interp_pk = interp1d(np.log(k_out), np.real(P_hh_gp),
-                                             kind='linear', bounds_error=False,
-                                             fill_value='extrapolate')
-                        phh[iz, i, j, :] = interp_pk(np.log(k_target))
-                    except Exception as e:
-                        raise RuntimeError(
-                            'Transforming xi_hh to P_hh failed at z=%s, mass indices '
-                            '(%d, %d); a zero block would silently corrupt the '
-                            '2-halo term.' % (z_key[iz], i, j)) from e 
-                    if j > i:
-                        phh[iz, j, i, :] = phh[iz, i, j, :]
+        phh = np.zeros((G, G, n_k))
+        for i in range(G):
+            for j in range(i, G):
+                try:
+                    xi_1d = xi_hh_slab[i, j, :]
+                    k_out, P_hh_gp = xi2P(r, xi_1d, l=0, ext=0, lowring=True)
+                    interp_pk = interp1d(np.log(k_out), np.real(P_hh_gp),
+                                         kind='linear', bounds_error=False,
+                                         fill_value='extrapolate')
+                    phh[i, j, :] = interp_pk(np.log(k_target))
+                except Exception as e:
+                    raise RuntimeError(
+                        'Transforming xi_hh to P_hh failed at z=%s, mass indices '
+                        '(%d, %d); a zero block would silently corrupt the '
+                        '2-halo term.' % (z, i, j)) from e
+                if j > i:
+                    phh[j, i, :] = phh[i, j, :]
         return phh
     
-    ########## precomputation  ##########
-    def _precompute_xi_hm_pkhm_grids(self):
-        """Precompute xi_hm and P_hm on all zlists x M_arr x fftbase.r/k."""
-        if self.verbose:
-            print(f"Precomputing xi_hm and P_hm on {len(self._z_pre)} redshifts ...")
-        self._xi_hm_full = self._compute_xi_hm_on_grid(self._z_pre, self.fftbase.r, self.M_grid)
-        self._xihm_mass_cache = (self._z_pre, self.fftbase.r, self.M_grid, self._xi_hm_full)
-        self._pkhm_full = self._compute_pkhm_on_grid(self._z_pre, self.fftbase.k, self.M_grid)
-        self._pkhm_mass_cache = (self._z_pre, self.fftbase.k, self.M_grid, self._pkhm_full)
-        if self.verbose:
-            print("  Done.")
+    ########## lazy precomputation  ##########
+    def _node_pair(self, z):
+        """The two snapshots bracketing z, clamped at the ends of the z grid."""
+        zs = self._z_pre
+        z  = float(z)
+        if z <= zs[0]:
+            return float(zs[0]), float(zs[1])
+        if z >= zs[-1]:
+            return float(zs[-2]), float(zs[-1])
+        hi = int(np.searchsorted(zs, z))
+        if zs[hi] == z:
+            nxt = hi + 1 if hi + 1 < len(zs) else hi - 1
+            return float(zs[hi]), float(zs[nxt])
+        return float(zs[hi - 1]), float(zs[hi])
 
-    def _precompute_xihh_phh_grids(self):
-        """Precompute xi_hh and P_hh on all zlists x fftbase.r/k x mass_nodes."""
-        if self.verbose:
-            print(f"Precomputing xi_hh and P_hh on {len(self._z_pre)} redshifts ...")
-        self._xi_hh_full = self._compute_xihh_on_grid(self._z_pre, self.fftbase.r)
-        self._xihh_blend_cache = (self._z_pre, self.fftbase.r, self.M_grid, self.M_grid, self._xi_hh_full)
-        self._phh_full = self._compute_phh_on_grid(self._z_pre)
-        self._phh_matrix_cache = (self._z_pre, self.fftbase.k, self.M_grid, self.M_grid, self._phh_full)
-        if self.verbose:
-            print("  Done.")
+    def _ensure_z(self, z):
+        """Compute and store the precomputed grids for one snapshot redshift.
+
+        The grids were previously built for all 12 snapshots up front, which cost
+        seconds per set_hod even though a likelihood evaluation asks for one or
+        two redshifts. Each slab is independent, so they are built on demand.
+        """
+        z = float(z)
+        if z in self._z_slabs['xihm']:
+            return
+        if self.xihm is not None:
+            xi_hm_slab = self._compute_xi_hm_on_grid(
+                np.array([z]), self.fftbase.r, self.M_grid)
+            self._z_slabs['xihm'][z] = xi_hm_slab[0]
+            self._z_slabs['pkhm'][z] = self._compute_pkhm_on_grid(
+                np.array([z]), self.fftbase.k, self.M_grid, xi_hm=xi_hm_slab)[0]
+        if self.xihh is not None:
+            slab = self._compute_xihh_on_grid(np.array([z]), self.fftbase.r)[0]
+            self._z_slabs['xihh'][z] = slab
+            self._z_slabs['phh'][z]  = self._compute_phh_slab(z, slab)
+        self._xi_hm_interpolator = None
+        self._pkhm_interpolator  = None
+        self._xi_hh_interpolator = None
+        self._phh_interpolator   = None
+
+    def _ensure_for(self, z_values):
+        """Make sure both bracketing snapshots of every requested z are built."""
+        for z in np.atleast_1d(z_values):
+            for zz in self._node_pair(z):
+                self._ensure_z(zz)
+
+    def _stacked(self, kind):
+        zs = np.array(sorted(self._z_slabs[kind]))
+        return zs, np.stack([self._z_slabs[kind][z] for z in zs])
     
     ####### Get r M z dependent quantities with caching and interpolation ########
     def _get_xihh_mass_blend_grid(self, z, r, M1, M2):
@@ -786,35 +804,20 @@ class GalaxyStatsCalculator:
                self._cache_matches(cached_M1, M1_key) and self._cache_matches(cached_M2, M2_key):
                 return cached_val
 
+        self._ensure_for(z_key)
         if self._xi_hh_interpolator is None:
+            zs, data = self._stacked('xihh')
             self._xi_hh_interpolator = RegularGridInterpolator(
-                ((self._z_pre), np.log10(self.M_grid), np.log10(self.M_grid), np.log(self.fftbase.r)),
-                self._xi_hh_full, bounds_error=False, fill_value=None)
-            uz = (z_key)
-            logr = np.log(r_key)
-            mass_idx1 = np.log10(M1_key)
-            mass_idx2 = np.log10(M2_key)
-            uz_g, mi_g, mj_g, logr_g = np.meshgrid(
-                uz, mass_idx1, mass_idx2, logr, indexing='ij')
-            points = np.column_stack(
-                [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), logr_g.ravel()])
-            result = self._xi_hh_interpolator(points).reshape(
-                len(z_key), len(M1_key), len(M2_key), len(r_key))
-            if len(z_key) == 1:
-                result = result[0]
-        else:
-            uz = (z_key)
-            logr = np.log(r_key)
-            mass_idx1 = np.log10(M1_key)
-            mass_idx2 = np.log10(M2_key)
-            uz_g, mi_g, mj_g, logr_g = np.meshgrid(
-                uz, mass_idx1, mass_idx2, logr, indexing='ij')
-            points = np.column_stack(
-                [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), logr_g.ravel()])
-            result = self._xi_hh_interpolator(points).reshape(
-                len(z_key), len(M1_key), len(M2_key), len(r_key))
-            if len(z_key) == 1: 
-                result = result[0]
+                (zs, np.log10(self.M_grid), np.log10(self.M_grid), np.log(self.fftbase.r)),
+                data, bounds_error=False, fill_value=None)
+        uz_g, mi_g, mj_g, logr_g = np.meshgrid(
+            z_key, np.log10(M1_key), np.log10(M2_key), np.log(r_key), indexing='ij')
+        points = np.column_stack(
+            [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), logr_g.ravel()])
+        result = self._xi_hh_interpolator(points).reshape(
+            len(z_key), len(M1_key), len(M2_key), len(r_key))
+        if len(z_key) == 1:
+            result = result[0]
 
         return result
 
@@ -832,33 +835,20 @@ class GalaxyStatsCalculator:
                 self._cache_matches(cached_M1, M1_key) and self._cache_matches(cached_M2, M2_key):
                 return cached_data
 
+        self._ensure_for(z_key)
         if self._phh_interpolator is None:
+            zs, data = self._stacked('phh')
             self._phh_interpolator = RegularGridInterpolator(
-                ((self._z_pre), np.log10(self.M_grid), np.log10(self.M_grid), np.log(self.fftbase.k)),
-                self._phh_full, bounds_error=False, fill_value=None)
-            uz = z_key
-            mass_idx1 = np.log10(M1_key)
-            mass_idx2 = np.log10(M2_key)
-            uz_g, mi_g, mj_g, k_g = np.meshgrid(
-                uz, mass_idx1, mass_idx2, np.log(k_key), indexing='ij')
-            points = np.column_stack(
-                [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), k_g.ravel()])
-            result = self._phh_interpolator(points).reshape(
-                len(z_key), len(M1_key), len(M2_key), len(k_key))
-            if len(z_key) == 1:
-                result = result[0]
-        else:
-            uz = z_key
-            mass_idx1 = np.log10(M1)
-            mass_idx2 = np.log10(M2)
-            uz_g, mi_g, mj_g, k_g = np.meshgrid(
-                uz, mass_idx1, mass_idx2, np.log(k_key), indexing='ij')
-            points = np.column_stack(
-                [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), k_g.ravel()])
-            result = self._phh_interpolator(points).reshape(
-                len(z_key), len(M1_key), len(M2_key), len(k_key))
-            if len(z_key) == 1: 
-                result = result[0]
+                (zs, np.log10(self.M_grid), np.log10(self.M_grid), np.log(self.fftbase.k)),
+                data, bounds_error=False, fill_value=None)
+        uz_g, mi_g, mj_g, k_g = np.meshgrid(
+            z_key, np.log10(M1_key), np.log10(M2_key), np.log(k_key), indexing='ij')
+        points = np.column_stack(
+            [uz_g.ravel(), mi_g.ravel(), mj_g.ravel(), k_g.ravel()])
+        result = self._phh_interpolator(points).reshape(
+            len(z_key), len(M1_key), len(M2_key), len(k_key))
+        if len(z_key) == 1:
+            result = result[0]
         return result # (n_z, G, G, n_k) or (G, G, n_k) if single z
 
     def _get_xi_hm_for_masses(self, z, r, M_arr):
@@ -876,26 +866,17 @@ class GalaxyStatsCalculator:
                 self._cache_matches(cached_M, M_key):
                 return cached_data
 
+        self._ensure_for(z_key)
         if self._xi_hm_interpolator is None:
-            # Build interpolators
+            zs, data = self._stacked('xihm')
             self._xi_hm_interpolator = RegularGridInterpolator(
-                ((self._z_pre), np.log10(self.M_grid), np.log(self.fftbase.r)),
-                self._xi_hm_full, bounds_error=False, fill_value=None)
-            uz   = (z_key)
-            logM = np.log10(M_key)
-            logr = np.log(r_key)
-            uz_g, logM_g, logr_g = np.meshgrid(uz, logM, logr, indexing='ij')
-            points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logr_g.ravel()])
-            result = self._xi_hm_interpolator(points).reshape(
-                len(z_key), len(M_key), len(r_key))
-        else:
-            uz   = (z_key)
-            logM = np.log10(M_key)
-            logr = np.log(r_key)
-            uz_g, logM_g, logr_g = np.meshgrid(uz, logM, logr, indexing='ij')
-            points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logr_g.ravel()])
-            result = self._xi_hm_interpolator(points).reshape(
-                len(z_key), len(M_key), len(r_key))
+                (zs, np.log10(self.M_grid), np.log(self.fftbase.r)),
+                data, bounds_error=False, fill_value=None)
+        uz_g, logM_g, logr_g = np.meshgrid(
+            z_key, np.log10(M_key), np.log(r_key), indexing='ij')
+        points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logr_g.ravel()])
+        result = self._xi_hm_interpolator(points).reshape(
+            len(z_key), len(M_key), len(r_key))
         return result  # (n_z, n_mass, n_r)
      
     def _get_pkhm_for_masses(self, z, k, M_arr):
@@ -913,30 +894,19 @@ class GalaxyStatsCalculator:
                 self._cache_matches(cached_M, M_key):
                 return cached_data
 
+        self._ensure_for(z_key)
         if self._pkhm_interpolator is None:
+            zs, data = self._stacked('pkhm')
             self._pkhm_interpolator = RegularGridInterpolator(
-                ((self._z_pre), np.log10(self.M_grid), np.log(self.fftbase.k)),
-                self._pkhm_full, bounds_error=False, fill_value=None)
-            uz   = (z_key)
-            logM = np.log10(M_key)
-            logk = np.log(k_key)
-            uz_g, logM_g, logk_g = np.meshgrid(uz, logM, logk, indexing='ij')
-            points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logk_g.ravel()])
-            result = self._pkhm_interpolator(points).reshape(
-                len(z_key), len(M_key), len(k_key))
-            if len(z_key) == 1:
-                result = result[0]
-        else:
-            uz   = (z_key)
-            logM = np.log10(M_key)
-            logk = np.log(k_key)
-            uz_g, logM_g, logk_g = np.meshgrid(uz, logM, logk, indexing='ij')
-            points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logk_g.ravel()])
-            result = self._pkhm_interpolator(points).reshape(
-                len(z_key), len(M_key), len(k_key))
-            if len(z_key) == 1:
-                result = result[0]
-
+                (zs, np.log10(self.M_grid), np.log(self.fftbase.k)),
+                data, bounds_error=False, fill_value=None)
+        uz_g, logM_g, logk_g = np.meshgrid(
+            z_key, np.log10(M_key), np.log(k_key), indexing='ij')
+        points = np.column_stack([uz_g.ravel(), logM_g.ravel(), logk_g.ravel()])
+        result = self._pkhm_interpolator(points).reshape(
+            len(z_key), len(M_key), len(k_key))
+        if len(z_key) == 1:
+            result = result[0]
         return result  # (n_z, n_mass, n_k)
 
     def compute_Xigm(self, r, z, hod_model, **hod_params):

@@ -2561,15 +2561,21 @@ class GalaxyEmulator(Xihm_CEmulator):
 
         # Initialize galaxy stats calculator
         from .emulator.GalaxyStats import GalaxyStatsCalculator
-        self._galaxy_calc = GalaxyStatsCalculator(
-            hmf_emu=self,
-            xihm_emu=self,
-            xihh_emu=self.Xihh,
-            mass_def='RockstarM200m',
-            Omegam=getattr(self.Cosmo, 'Omegam', 0.315), # Only cb component
-            zlists=self.zlists,
-            verbose=self.verbose
-        )
+        if self._galaxy_calc is None:
+            self._galaxy_calc = GalaxyStatsCalculator(
+                hmf_emu=self,
+                xihm_emu=self,
+                xihh_emu=self.Xihh,
+                mass_def='RockstarM200m',
+                Omegam=getattr(self.Cosmo, 'Omegam', 0.315), # Only cb component
+                zlists=self.zlists,
+                verbose=self.verbose
+            )
+        else:
+            # the calculator keeps no HOD state -- every compute_* call receives
+            # the model and parameters -- so a new HOD only needs its caches
+            # dropped, not the cosmology grids rebuilt
+            self._galaxy_calc.clear_cache()
 
         if self.verbose:
             print(f"HOD model set to {model_name} with parameters: {hod_params}")
