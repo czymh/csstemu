@@ -164,6 +164,25 @@ def _u_m_term(m, mu, q, xy, L):
     return u_m
 
 
+# u_m depends only on the transform grid (mu, q, xy, L, N), not on the data, and
+# _gamma_term over N complex arguments is the bulk of each transform's cost.
+# The key set is tiny and bounded, so the cache cannot grow.
+_UM_CACHE = {}
+
+
+def _u_m_term_cached(m, mu, q, xy, L):
+    """Memoized :func:`_u_m_term`.
+
+    The returned array is shared; callers must not modify it in place.
+    """
+    key = (m.size, float(mu), float(q), float(xy), float(L))
+    u_m = _UM_CACHE.get(key)
+    if u_m is None:
+        u_m = _u_m_term(m, mu, q, xy, L)
+        _UM_CACHE[key] = u_m
+    return u_m
+
+
 def FFTLog(x, f_x, q, mu, xy=1.0, lowring=False, ext=0, range=None, return_ext=False):
     r"""Hankel Transform based on the FFTLog algorithm of [1] and [2].
 
@@ -253,7 +272,7 @@ def FFTLog(x, f_x, q, mu, xy=1.0, lowring=False, ext=0, range=None, return_ext=F
     id = m_shift
     y = 10 ** (s[id] / np.log(10))
 
-    u_m = _u_m_term(m, mu, q, xy, L)
+    u_m = _u_m_term_cached(m, mu, q, xy, L)
     b = c_m * u_m
 
     A_m = np.fft.irfft(b)

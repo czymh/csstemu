@@ -154,6 +154,20 @@ e2.get_dndlnM(z=Z, M=M)
 check('no get_data() call on a warm cache', len(calls) == 0, '%d calls' % len(calls))
 
 print()
+print('[7] the FFTLog u_m term is memoized, and the memo is safe')
+
+from CEmulator.hankl.fftlog import _UM_CACHE
+
+k = np.logspace(-5, 5, 1024)
+P = k ** -2.0
+first = P2xi(k, P, 0)[1]
+second = P2xi(k, P, 0)[1]
+check('a repeated transform is bit identical', np.array_equal(first, second))
+check('the cache stays small', len(_UM_CACHE) <= 8, '%d entries' % len(_UM_CACHE))
+check('the cached array is not mutated by the caller',
+      np.array_equal(P2xi(k, P, 0)[1], first))
+
+print()
 if _FAIL:
     print('FAIL: %d check(s) failed' % len(_FAIL))
     sys.exit(1)
