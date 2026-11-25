@@ -10,4 +10,7 @@ CEmulator.egg-info/
 *.pyc
 
 
+examples/c0000-test.ipynb
+examples/Uchuu1000-Pl18-test.ipynb
+.ipynb_checkpoints*
 

@@ -8,7 +8,7 @@ Firstly, we show the density field in 200 Mpc/h box for different cosmologies.
 .. figure:: ./pic/field200Mpc_over_h_lowres.png
    :alt: Density Field in 200 Mpc/h Box for Different Cosmologies
 
-   200 Mpc/h density plot. Download here: :download:`2.8M dpi=100 PNG <./pic/field200Mpc_over_h_lowres.png>`. A high resolution version is available :download:`23M dpi=300 PNG <./pic/field200Mpc_over_h.png>`.
+   200 Mpc/h density plot. Download here: :download:`2.8M dpi=100 PNG <./pic/field200Mpc_over_h_lowres.png>`. A high resolution version is available `23M dpi=300 PNG <https://kunsimulation.readthedocs.io/en/latest/visualization.html>`_.
 
 Then we show the halo distribution in 200 Mpc/h box for different cosmologies.
 
@@ -18,13 +18,13 @@ Much larger changes between different subplots than previous plot, which indicat
 .. figure:: ./pic/field50Mpc_over_h_lowres.png
    :alt: Density Field in 50 Mpc/h Box for Different Cosmologies
 
-   50 Mpc/h density plot. Download here: :download:`2.8M dpi=100 PNG <./pic/field50Mpc_over_h_lowres.png>`. A high resolution version is available :download:`25M dpi=300 PNG <./pic/field50Mpc_over_h.png>`.
+   50 Mpc/h density plot. Download here: :download:`2.8M dpi=100 PNG <./pic/field50Mpc_over_h_lowres.png>`. A high resolution version is available `25M dpi=300 PNG <https://kunsimulation.readthedocs.io/en/latest/visualization.html>`_.
 
 
 .. figure:: ./pic/halo_lowres_arrayplots.png
    :alt: Halo in Different Cosmologies
 
-   24 Mpc/h density plot. Download here: :download:`2.7M dpi=100 PNG <./pic/halo_lowres_arrayplots.png>`. A high resolution version is available :download:`24M dpi=300 PNG <./pic/halo_arrayplots.png>`.
+   24 Mpc/h density plot. Download here: :download:`2.7M dpi=100 PNG <./pic/halo_lowres_arrayplots.png>`. A high resolution version is available `24M dpi=300 PNG <https://kunsimulation.readthedocs.io/en/latest/visualization.html>`_.
 
 Other visualizations are coming soon.
 

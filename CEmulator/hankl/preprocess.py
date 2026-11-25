@@ -1,4 +1,21 @@
+import warnings
+
 import numpy as np
+
+
+def _powerlaw_tail(f_edge, ratio, exponents):
+    '''
+    Extrapolate a power law past an array edge as f_edge * ratio**exponents.
+
+    The naive expression yields 0/0 when the edge is zero and nan/inf when the
+    ratio is not a positive finite number. Keep a zero edge at zero and fall
+    back to constant padding in the pathological cases.
+    '''
+    if f_edge == 0:
+        return np.zeros(len(exponents))
+    if not np.isfinite(ratio) or ratio <= 0:
+        return np.full(len(exponents), f_edge)
+    return f_edge * ratio ** exponents
 
 
 def preprocess(x, f, ext=0, range=None):
@@ -40,7 +57,7 @@ def preprocess(x, f, ext=0, range=None):
     if range is not None:
         try:
             x_min, x_max = range
-        except:
+        except (TypeError, ValueError):
             raise TypeError(
                 "Please enter valid x range in the form of a tuple (x_min, x_max) or list [x_min, x_max]."
             )
@@ -50,17 +67,30 @@ def preprocess(x, f, ext=0, range=None):
 
     try:
         ext_left, ext_right = ext
-    except:
+    except TypeError:
         ext_left = ext_right = ext
+
+    for ext_ in (ext_left, ext_right):
+        if ext_ not in (0, 1, 2, 3):
+            raise ValueError(
+                "Please provide valid values for ext argument (i.e. 0, 1, 2, 3), got %r." % (ext_,)
+            )
 
     x, f, N_left, N_right = padding(
         x, f, ext_left=ext_left, ext_right=ext_right, n_ext=0
     )
 
+    max_pass = 100 # each pass doubles the array; a distant range must fail, not OOM
+    n_pass = 0
+
     if (x_min is not None) and (x_max is not None):
 
         if ext_left > 0 and ext_right > 0:
             while x[0] > x_min and x[-1] < x_max:
+                n_pass += 1
+                if n_pass > max_pass:
+                    raise ValueError('Extending x to [%g, %g] needs more than %d passes.'
+                                     % (x_min, x_max, max_pass))
                 x, f, N_left_prime, N_right_prime = padding(
                     x, f, ext_left=ext_left, ext_right=ext_right, n_ext=1
                 )
@@ -71,6 +101,10 @@ def preprocess(x, f, ext=0, range=None):
 
         if ext_left > 0:
             while x[0] > x_min and (x_max is None or x[-1] >= x_max):
+                n_pass += 1
+                if n_pass > max_pass:
+                    raise ValueError('Extending x down to %g needs more than %d passes.'
+                                     % (x_min, max_pass))
                 x, f, N_left_prime, N_right_prime = padding(
                     x, f, ext_left=ext_left, ext_right=0, n_ext=1
                 )
@@ -81,11 +115,19 @@ def preprocess(x, f, ext=0, range=None):
 
         if ext_right > 0:
             while x[-1] < x_max and (x_min is None or x[0] <= x_min):
+                n_pass += 1
+                if n_pass > max_pass:
+                    raise ValueError('Extending x up to %g needs more than %d passes.'
+                                     % (x_max, max_pass))
                 x, f, N_left_prime, N_right_prime = padding(
                     x, f, ext_left=0, ext_right=ext_right, n_ext=1
                 )
                 N_left += N_left_prime
                 N_right += N_right_prime
+
+    if (x_min is not None and x[0] < x_min) or (x_max is not None and x[-1] > x_max):
+        warnings.warn('The requested range is already inside the input x; '
+                      'extrapolation was a no-op.', UserWarning)
 
     return x, f, N_left, N_right
 
@@ -167,7 +209,8 @@ def padding(x, f, ext_left=0, ext_right=0, n_ext=0):
             elif ext_left == 2:
                 f_left = np.full(N_left, f[0])
             elif ext_left == 3:
-                f_left = f[0] * (f[1] / f[0]) ** np.arange(-N_left, 0)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    f_left = _powerlaw_tail(f[0], f[1] / f[0], np.arange(-N_left, 0))
             else:
                 raise ValueError(
                     "Please provide valid values for ext argument (i.e. 0, 1, 2, 3)"
@@ -181,7 +224,8 @@ def padding(x, f, ext_left=0, ext_right=0, n_ext=0):
             elif ext_right == 2:
                 f_right = np.full(N_right, f[-1])
             elif ext_right == 3:
-                f_right = f[-1] * (f[-1] / f[-2]) ** np.arange(1, N_right + 1)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    f_right = _powerlaw_tail(f[-1], f[-1] / f[-2], np.arange(1, N_right + 1))
             else:
                 raise ValueError(
                     "Please provide valid values for ext argument (i.e. 0, 1, 2, 3)"

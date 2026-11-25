@@ -1,0 +1,850 @@
+{
+ "cosmos": {
+  "c0": {
+   "As": 2.1e-09,
+   "H0": 68.98,
+   "Omegab": 0.0486,
+   "Omegac": 0.2604,
+   "mnu": 0.06,
+   "ns": 0.9665,
+   "w": -1.0,
+   "wa": 0.0
+  },
+  "c1": {
+   "As": 2.1e-09,
+   "H0": 68.98,
+   "Omegab": 0.0486,
+   "Omegac": 0.2604,
+   "mnu": 0.0,
+   "ns": 0.9665,
+   "w": -1.0,
+   "wa": 0.0
+  },
+  "c2": {
+   "As": 1.9e-09,
+   "H0": 63.0,
+   "Omegab": 0.045,
+   "Omegac": 0.31,
+   "mnu": 0.15,
+   "ns": 0.98,
+   "w": -0.9,
+   "wa": 0.2
+  }
+ },
+ "created": "2026-11-23 21:51:01",
+ "errors": {
+  "c0|galaxy|hmf|get_mass_from_lgden[desc]": "ValueError: lgden must be strictly increasing, got [-3.  -3.5 -4. ]. The cumulative number density falls as the mass threshold rises, so callers that build lgden from an ascending M grid must reverse it first.",
+  "c1|galaxy|hmf|get_mass_from_lgden[desc]": "ValueError: lgden must be strictly increasing, got [-3.  -3.5 -4. ]. The cumulative number density falls as the mass threshold rises, so callers that build lgden from an ascending M grid must reverse it first.",
+  "c2|galaxy|hmf|get_mass_from_lgden[desc]": "ValueError: lgden must be strictly increasing, got [-3.  -3.5 -4. ]. The cumulative number density falls as the mass threshold rises, so callers that build lgden from an ascending M grid must reverse it first."
+ },
+ "numpy": "1.26.4",
+ "rss_mb": {
+  "c0|galaxy": 416.56640625,
+  "c0|pkmm": 214.2734375,
+  "c0|tk": 402.53515625,
+  "c1|galaxy": 417.796875,
+  "c1|pkmm": 402.53515625,
+  "c1|tk": 423.02734375,
+  "c2|galaxy": 423.03125,
+  "c2|pkmm": 423.02734375,
+  "c2|tk": 423.3203125,
+  "callorder": 418.06640625
+ },
+ "shapes": {
+  "c0|galaxy|galaxy|DeltaSigma": [
+   12
+  ],
+  "c0|galaxy|galaxy|DeltaSigma_components": [
+   36
+  ],
+  "c0|galaxy|galaxy|M_eff": [
+   4
+  ],
+  "c0|galaxy|galaxy|Pgg": [
+   40
+  ],
+  "c0|galaxy|galaxy|Pgg[array-z]": [
+   40
+  ],
+  "c0|galaxy|galaxy|Pgm": [
+   40
+  ],
+  "c0|galaxy|galaxy|Xigg": [
+   30
+  ],
+  "c0|galaxy|galaxy|Xigm": [
+   30
+  ],
+  "c0|galaxy|galaxy|Xigm_fourier": [
+   30
+  ],
+  "c0|galaxy|galaxy|bias_gal": [
+   4
+  ],
+  "c0|galaxy|galaxy|f_sat": [
+   4
+  ],
+  "c0|galaxy|galaxy|ngal": [
+   4
+  ],
+  "c0|galaxy|galaxy|wgm": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp_cc_2h": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp_cs_1h": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp_cs_2h": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp_ss_1h": [
+   12
+  ],
+  "c0|galaxy|galaxy|wp_ss_2h": [
+   12
+  ],
+  "c0|galaxy|galcache|DeltaSigma[repeat]": [
+   12
+  ],
+  "c0|galaxy|galcache|Pgg[repeat]": [
+   40
+  ],
+  "c0|galaxy|galcache|Pgm[repeat]": [
+   40
+  ],
+  "c0|galaxy|galcache|Xigg[repeat]": [
+   30
+  ],
+  "c0|galaxy|galcache|Xigm[repeat]": [
+   30
+  ],
+  "c0|galaxy|galcache|wgm[repeat]": [
+   12
+  ],
+  "c0|galaxy|galcache|wp[repeat]": [
+   12
+  ],
+  "c0|galaxy|galpgg|Pgg[array-z,cold]": [
+   40
+  ],
+  "c0|galaxy|hmf|get_Nhalo[FoFM200c]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_Nhalo[FoFM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_Nhalo[RockstarM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_Nhalo[RockstarMvir]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_Nhalo[RockstarMvir_bound]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_Castro23[FoFM200c]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_Castro23[FoFM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_lgnbar_threshold": [
+   12
+  ],
+  "c0|galaxy|hmf|get_bias_mass": [
+   120
+  ],
+  "c0|galaxy|hmf|get_bias_mass_threshold": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM[FoFM200c]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM[FoFM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM[RockstarM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM[RockstarMvir]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM[RockstarMvir_bound]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Castro23[FoFM200c]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Castro23[FoFM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c0|galaxy|hmf|get_dndlnM_Tinker08": [
+   120
+  ],
+  "c0|galaxy|hmf|get_mass_from_lgden[asc]": [
+   18
+  ],
+  "c0|galaxy|pkhm|get_pkhm_lgnbar_threshold": [
+   480
+  ],
+  "c0|galaxy|pkhm|get_pkhm_mass": [
+   3200
+  ],
+  "c0|galaxy|pkhm|get_pkhm_mass_threshold": [
+   3200
+  ],
+  "c0|galaxy|pkhm|get_pkhm_mass_threshold[notebook]": [
+   600
+  ],
+  "c0|galaxy|xihh|get_xihh_lgnbar_threshold": [
+   1080
+  ],
+  "c0|galaxy|xihh|get_xihh_mass": [
+   48000
+  ],
+  "c0|galaxy|xihm|get_xihm_lgnbar_threshold": [
+   360
+  ],
+  "c0|galaxy|xihm|get_xihm_mass": [
+   2400
+  ],
+  "c0|galaxy|ximm|get_ximmHMCODE2020": [
+   180
+  ],
+  "c0|galaxy|ximm|get_ximmhalofit": [
+   180
+  ],
+  "c0|galaxy|ximm|get_ximmlinear": [
+   180
+  ],
+  "c0|galaxy|ximm|get_ximmnl": [
+   180
+  ],
+  "c0|pkmm|pkmm|get_pkHMCODE2020": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pkhalofit": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[cb,CAMB]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[cb,CLASS]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[cb,Emulator]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[tot,CAMB]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[tot,CLASS]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pklin[tot,Emulator]": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pknl[nltype='halofit']": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pknl[nltype='hmcode2020']": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pknl_extrp[nltype='halofit']": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_pknl_extrp[nltype='hmcode2020']": [
+   240
+  ],
+  "c0|pkmm|pkmm|get_sigma8": [
+   1
+  ],
+  "c0|pkmm|pkmm|get_sigma8_cb": [
+   1
+  ],
+  "c0|pkmm|pkmm|get_sigma_cb_z": [
+   12
+  ],
+  "c0|pkmm|pkmm|get_sigma_z": [
+   12
+  ],
+  "c0|tk|tk|get_Tk[linear]": [
+   240
+  ],
+  "c1|galaxy|galaxy|DeltaSigma": [
+   12
+  ],
+  "c1|galaxy|galaxy|DeltaSigma_components": [
+   36
+  ],
+  "c1|galaxy|galaxy|M_eff": [
+   4
+  ],
+  "c1|galaxy|galaxy|Pgg": [
+   40
+  ],
+  "c1|galaxy|galaxy|Pgg[array-z]": [
+   40
+  ],
+  "c1|galaxy|galaxy|Pgm": [
+   40
+  ],
+  "c1|galaxy|galaxy|Xigg": [
+   30
+  ],
+  "c1|galaxy|galaxy|Xigm": [
+   30
+  ],
+  "c1|galaxy|galaxy|Xigm_fourier": [
+   30
+  ],
+  "c1|galaxy|galaxy|bias_gal": [
+   4
+  ],
+  "c1|galaxy|galaxy|f_sat": [
+   4
+  ],
+  "c1|galaxy|galaxy|ngal": [
+   4
+  ],
+  "c1|galaxy|galaxy|wgm": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp_cc_2h": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp_cs_1h": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp_cs_2h": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp_ss_1h": [
+   12
+  ],
+  "c1|galaxy|galaxy|wp_ss_2h": [
+   12
+  ],
+  "c1|galaxy|galcache|DeltaSigma[repeat]": [
+   12
+  ],
+  "c1|galaxy|galcache|Pgg[repeat]": [
+   40
+  ],
+  "c1|galaxy|galcache|Pgm[repeat]": [
+   40
+  ],
+  "c1|galaxy|galcache|Xigg[repeat]": [
+   30
+  ],
+  "c1|galaxy|galcache|Xigm[repeat]": [
+   30
+  ],
+  "c1|galaxy|galcache|wgm[repeat]": [
+   12
+  ],
+  "c1|galaxy|galcache|wp[repeat]": [
+   12
+  ],
+  "c1|galaxy|galpgg|Pgg[array-z,cold]": [
+   40
+  ],
+  "c1|galaxy|hmf|get_Nhalo[FoFM200c]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_Nhalo[FoFM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_Nhalo[RockstarM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_Nhalo[RockstarMvir]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_Nhalo[RockstarMvir_bound]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_Castro23[FoFM200c]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_Castro23[FoFM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_lgnbar_threshold": [
+   12
+  ],
+  "c1|galaxy|hmf|get_bias_mass": [
+   120
+  ],
+  "c1|galaxy|hmf|get_bias_mass_threshold": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM[FoFM200c]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM[FoFM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM[RockstarM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM[RockstarMvir]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM[RockstarMvir_bound]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Castro23[FoFM200c]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Castro23[FoFM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c1|galaxy|hmf|get_dndlnM_Tinker08": [
+   120
+  ],
+  "c1|galaxy|hmf|get_mass_from_lgden[asc]": [
+   18
+  ],
+  "c1|galaxy|pkhm|get_pkhm_lgnbar_threshold": [
+   480
+  ],
+  "c1|galaxy|pkhm|get_pkhm_mass": [
+   3200
+  ],
+  "c1|galaxy|pkhm|get_pkhm_mass_threshold": [
+   3200
+  ],
+  "c1|galaxy|pkhm|get_pkhm_mass_threshold[notebook]": [
+   600
+  ],
+  "c1|galaxy|xihh|get_xihh_lgnbar_threshold": [
+   1080
+  ],
+  "c1|galaxy|xihh|get_xihh_mass": [
+   48000
+  ],
+  "c1|galaxy|xihm|get_xihm_lgnbar_threshold": [
+   360
+  ],
+  "c1|galaxy|xihm|get_xihm_mass": [
+   2400
+  ],
+  "c1|galaxy|ximm|get_ximmHMCODE2020": [
+   180
+  ],
+  "c1|galaxy|ximm|get_ximmhalofit": [
+   180
+  ],
+  "c1|galaxy|ximm|get_ximmlinear": [
+   180
+  ],
+  "c1|galaxy|ximm|get_ximmnl": [
+   180
+  ],
+  "c1|pkmm|pkmm|get_pkHMCODE2020": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pkhalofit": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[cb,CAMB]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[cb,CLASS]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[cb,Emulator]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[tot,CAMB]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[tot,CLASS]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pklin[tot,Emulator]": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pknl[nltype='halofit']": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pknl[nltype='hmcode2020']": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pknl_extrp[nltype='halofit']": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_pknl_extrp[nltype='hmcode2020']": [
+   240
+  ],
+  "c1|pkmm|pkmm|get_sigma8": [
+   1
+  ],
+  "c1|pkmm|pkmm|get_sigma8_cb": [
+   1
+  ],
+  "c1|pkmm|pkmm|get_sigma_cb_z": [
+   12
+  ],
+  "c1|pkmm|pkmm|get_sigma_z": [
+   12
+  ],
+  "c1|tk|tk|get_Tk[linear]": [
+   240
+  ],
+  "c2|galaxy|galaxy|DeltaSigma": [
+   12
+  ],
+  "c2|galaxy|galaxy|DeltaSigma_components": [
+   36
+  ],
+  "c2|galaxy|galaxy|M_eff": [
+   4
+  ],
+  "c2|galaxy|galaxy|Pgg": [
+   40
+  ],
+  "c2|galaxy|galaxy|Pgg[array-z]": [
+   40
+  ],
+  "c2|galaxy|galaxy|Pgm": [
+   40
+  ],
+  "c2|galaxy|galaxy|Xigg": [
+   30
+  ],
+  "c2|galaxy|galaxy|Xigm": [
+   30
+  ],
+  "c2|galaxy|galaxy|Xigm_fourier": [
+   30
+  ],
+  "c2|galaxy|galaxy|bias_gal": [
+   4
+  ],
+  "c2|galaxy|galaxy|f_sat": [
+   4
+  ],
+  "c2|galaxy|galaxy|ngal": [
+   4
+  ],
+  "c2|galaxy|galaxy|wgm": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp_cc_2h": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp_cs_1h": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp_cs_2h": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp_ss_1h": [
+   12
+  ],
+  "c2|galaxy|galaxy|wp_ss_2h": [
+   12
+  ],
+  "c2|galaxy|galcache|DeltaSigma[repeat]": [
+   12
+  ],
+  "c2|galaxy|galcache|Pgg[repeat]": [
+   40
+  ],
+  "c2|galaxy|galcache|Pgm[repeat]": [
+   40
+  ],
+  "c2|galaxy|galcache|Xigg[repeat]": [
+   30
+  ],
+  "c2|galaxy|galcache|Xigm[repeat]": [
+   30
+  ],
+  "c2|galaxy|galcache|wgm[repeat]": [
+   12
+  ],
+  "c2|galaxy|galcache|wp[repeat]": [
+   12
+  ],
+  "c2|galaxy|galpgg|Pgg[array-z,cold]": [
+   40
+  ],
+  "c2|galaxy|hmf|get_Nhalo[FoFM200c]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_Nhalo[FoFM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_Nhalo[RockstarM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_Nhalo[RockstarMvir]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_Nhalo[RockstarMvir_bound]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_Castro23[FoFM200c]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_Castro23[FoFM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_lgnbar_threshold": [
+   12
+  ],
+  "c2|galaxy|hmf|get_bias_mass": [
+   120
+  ],
+  "c2|galaxy|hmf|get_bias_mass_threshold": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM[FoFM200c]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM[FoFM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM[RockstarM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM[RockstarMvir]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM[RockstarMvir_bound]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Castro23[FoFM200c]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Castro23[FoFM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Castro23[RockstarM200m]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Castro23[RockstarMvir_bound]": [
+   120
+  ],
+  "c2|galaxy|hmf|get_dndlnM_Tinker08": [
+   120
+  ],
+  "c2|galaxy|hmf|get_mass_from_lgden[asc]": [
+   18
+  ],
+  "c2|galaxy|pkhm|get_pkhm_lgnbar_threshold": [
+   480
+  ],
+  "c2|galaxy|pkhm|get_pkhm_mass": [
+   3200
+  ],
+  "c2|galaxy|pkhm|get_pkhm_mass_threshold": [
+   3200
+  ],
+  "c2|galaxy|pkhm|get_pkhm_mass_threshold[notebook]": [
+   600
+  ],
+  "c2|galaxy|xihh|get_xihh_lgnbar_threshold": [
+   1080
+  ],
+  "c2|galaxy|xihh|get_xihh_mass": [
+   48000
+  ],
+  "c2|galaxy|xihm|get_xihm_lgnbar_threshold": [
+   360
+  ],
+  "c2|galaxy|xihm|get_xihm_mass": [
+   2400
+  ],
+  "c2|galaxy|ximm|get_ximmHMCODE2020": [
+   180
+  ],
+  "c2|galaxy|ximm|get_ximmhalofit": [
+   180
+  ],
+  "c2|galaxy|ximm|get_ximmlinear": [
+   180
+  ],
+  "c2|galaxy|ximm|get_ximmnl": [
+   180
+  ],
+  "c2|pkmm|pkmm|get_pkHMCODE2020": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pkhalofit": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[cb,CAMB]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[cb,CLASS]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[cb,Emulator]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[tot,CAMB]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[tot,CLASS]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pklin[tot,Emulator]": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pknl[nltype='halofit']": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pknl[nltype='hmcode2020']": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pknl_extrp[nltype='halofit']": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_pknl_extrp[nltype='hmcode2020']": [
+   240
+  ],
+  "c2|pkmm|pkmm|get_sigma8": [
+   1
+  ],
+  "c2|pkmm|pkmm|get_sigma8_cb": [
+   1
+  ],
+  "c2|pkmm|pkmm|get_sigma_cb_z": [
+   12
+  ],
+  "c2|pkmm|pkmm|get_sigma_z": [
+   12
+  ],
+  "c2|tk|tk|get_Tk[linear]": [
+   240
+  ],
+  "callorder|callorder|callorder|co_galaxy_DeltaSigma_fresh": [
+   8
+  ],
+  "callorder|callorder|callorder|co_galaxy_DeltaSigma_seq": [
+   8
+  ],
+  "callorder|callorder|callorder|co_galaxy_Xigm_fresh": [
+   8
+  ],
+  "callorder|callorder|callorder|co_galaxy_Xigm_seq": [
+   8
+  ],
+  "callorder|callorder|callorder|co_pkhm_fresh": [
+   8
+  ],
+  "callorder|callorder|callorder|co_pkhm_seq": [
+   8
+  ],
+  "callorder|callorder|callorder|co_xihm_fresh": [
+   8
+  ],
+  "callorder|callorder|callorder|co_xihm_seq": [
+   8
+  ]
+ },
+ "timing": {
+  "c0|galaxy|construct+set": 2.227888822555542,
+  "c0|galaxy|galaxy|": 0.694974422454834,
+  "c0|galaxy|galcache|": 0.23706507682800293,
+  "c0|galaxy|galpgg|": 0.2909524440765381,
+  "c0|galaxy|hmf|": 3.6267850399017334,
+  "c0|galaxy|pkhm|": 0.13247013092041016,
+  "c0|galaxy|xihh|": 1.228928565979004,
+  "c0|galaxy|xihm|": 0.10348653793334961,
+  "c0|galaxy|ximm|": 0.09523391723632812,
+  "c0|pkmm|construct+set": 1.0433902740478516,
+  "c0|pkmm|pkmm|": 35.50681519508362,
+  "c0|tk|construct+set": 0.6314735412597656,
+  "c0|tk|tk|": 0.001680135726928711,
+  "c1|galaxy|construct+set": 1.334486722946167,
+  "c1|galaxy|galaxy|": 0.6780648231506348,
+  "c1|galaxy|galcache|": 0.23532533645629883,
+  "c1|galaxy|galpgg|": 0.27895379066467285,
+  "c1|galaxy|hmf|": 3.6113386154174805,
+  "c1|galaxy|pkhm|": 0.12492585182189941,
+  "c1|galaxy|xihh|": 1.214357852935791,
+  "c1|galaxy|xihm|": 0.0989675521850586,
+  "c1|galaxy|ximm|": 0.09525108337402344,
+  "c1|pkmm|construct+set": 0.5274474620819092,
+  "c1|pkmm|pkmm|": 14.568990707397461,
+  "c1|tk|construct+set": 0.4748406410217285,
+  "c1|tk|tk|": 0.0016155242919921875,
+  "c2|galaxy|construct+set": 2.589035987854004,
+  "c2|galaxy|galaxy|": 0.6632659435272217,
+  "c2|galaxy|galcache|": 0.23358631134033203,
+  "c2|galaxy|galpgg|": 0.28106117248535156,
+  "c2|galaxy|hmf|": 3.575792074203491,
+  "c2|galaxy|pkhm|": 0.12639927864074707,
+  "c2|galaxy|xihh|": 1.2119190692901611,
+  "c2|galaxy|xihm|": 0.1016385555267334,
+  "c2|galaxy|ximm|": 0.08927559852600098,
+  "c2|pkmm|construct+set": 0.5352280139923096,
+  "c2|pkmm|pkmm|": 34.338876485824585,
+  "c2|tk|construct+set": 0.5905025005340576,
+  "c2|tk|tk|": 0.0016603469848632812,
+  "callorder|callorder|total|": 18.504973649978638
+ }
+}

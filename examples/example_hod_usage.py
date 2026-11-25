@@ -130,7 +130,7 @@ def example_redshift_evolution():
                 logMmin=12.0, sigma_logM=0.5,
                 logM0=12.5, logM1=13.5, alpha=1.0)
 
-    z_arr = np.array([0.0, 0.5, 1.0, 1.5, 2.0])
+    z_arr = np.array([0.0, 0.2, 0.4, 0.6, 0.8])
 
     print("\nRedshift evolution of galaxy properties:")
     print(f"{'z':>5} {'n_gal':>12} {'f_sat':>8} {'M_eff':>12} {'bias':>8}")
@@ -234,7 +234,7 @@ def example_galaxy_lensing():
               f"{DS[0, i] if DS.ndim > 1 else DS[i]:18.3f}")
 
     # Multi-redshift
-    z_arr = np.array([0.2, 0.5, 1.0])
+    z_arr = np.array([0.2, 0.5, 0.8])
     print(f"\n--- Multi-redshift ΔΣ at R = 1 Mpc/h ---")
     DS_multi = emu.DeltaSigma(R, z_arr)
     for i, zi in enumerate(z_arr):

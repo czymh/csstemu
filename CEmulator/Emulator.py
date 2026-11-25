@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d, RectBivariateSpline, RegularGridInterpol
 from scipy.interpolate import InterpolatedUnivariateSpline as ius
 from scipy.signal import savgol_filter
 from .cosmology import Cosmology
-from .emulator.Bkcb import Bkcb_gp, Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
+from .emulator.Bkcb import Bkcb_halofit_gp, Bkcb_lin2hmcode_gp, Bkcb_hmcode2020_gp
 from .emulator.TkNuNncdm import Tkcblin_gp, Tkmmlin_gp, Tkcbhalofit_gp, Tkmmhalofit_gp, Tkcbhmcode2020_gp, Tkmmhmcode2020_gp
 from .emulator.PkLin import PkcbLin_gp, Pknn_cbLin_gp
 from .emulator.HMF import HMFRockstarM200m_gp, HMFFoFM200m_gp, HMFFoFM200c_gp, HMFRockstarMvir_gp, HMFRockstarMvir_bound_gp
@@ -50,7 +50,11 @@ class CBaseEmulator:
         self.verbose             = verbose
         self.neutrino_mass_split = neutrino_mass_split
         self._fallback_mode      = False
+        self._fallback_warned    = False
+        self._extrap_warned      = set()
+        self._pcalc_cache        = {}   # (kind, z) -> (kcalc, P(k)) for the sigma_R integral
         self._camb_results_cache = None
+        self._camb_z_cache       = None
         self._cosmo_class_cache  = None
         self.Cosmo               = Cosmology(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
         self.Pkcblin             = PkcbLin_gp(verbose=verbose)
@@ -86,7 +90,7 @@ class CBaseEmulator:
             sigma8type: str, 'Emulator', 'CLASS' or 'CAMB', the method to calculate the sigma8.
             checkbound: bool, whether to check the parameter range.
             fallback_to_camb: bool, whether to fall back to CAMB when parameters are out of the emulator design range. Default is True.
-            fallback_verbose: bool, whether to output a warning when falling back to CAMB. Default is True.
+            fallback_verbose: bool, whether to output a warning when falling back to CAMB. Only the first occurrence per emulator instance is warned to avoid unbounded growth of the module ``__warningregistry__`` in long MCMC chains. Default is True.
         '''
         cosmos = {}
         cosmos['Omegab'] = (Omegab)
@@ -130,7 +134,7 @@ class CBaseEmulator:
                                 ikey, cosmos[ikey],
                                 self.param_limits[ikey][0],
                                 self.param_limits[ikey][1])
-                        warnings.warn(msg, UserWarning)
+                        self._warn_fallback(msg)
                     self._fallback_mode = True
 
         if As is not None:
@@ -142,22 +146,40 @@ class CBaseEmulator:
             sigma8_g = 0.0
             As1e9    = 2.105
             abserr   = 1e-4
-            while np.abs(sigma8_g - sigma8) > abserr:
+            maxiter  = 15
+            _fallback0 = self._fallback_mode
+            _Alo, _Ahi = self.param_limits['A']
+            for _ in range(maxiter):
                 cosmos['A'] = As1e9
                 #use 'Emulator', 'CLASS' or 'CAMB' to get sigma8
                 self.cosmologies = np.array([[cosmos['Omegab'], cosmos['Omegam'], cosmos['H0'], cosmos['ns'], \
                                               cosmos['A'], cosmos['w'], cosmos['wa'], cosmos['mnu']]]) 
                 ### set the cosmology class
                 self.Cosmo.set_cosmos(cosmos)
+                # _sync_cosmologies resets _fallback_mode; restore the decision
+                # made by the bounds check above. As drifts while iterating, so
+                # re-test it every step instead of extrapolating the emulator.
                 self._sync_cosmologies()
-                
+                self._fallback_mode = _fallback0 or (
+                    checkbound and not (_Alo <= As1e9 <= _Ahi))
+
                 # If in fallback mode and sigma8type is 'Emulator', use CAMB instead
                 _stype = sigma8type
                 if self._fallback_mode and sigma8type == 'Emulator':
                     _stype = 'CAMB'
                 sigma8_g = self.get_sigma8(type=_stype)
-                # print('Guess sigma8:', sigma8_g)
+                if not np.isfinite(sigma8_g) or sigma8_g <= 0:
+                    raise CEmulatorFallbackError(
+                        'sigma8 -> As iteration got sigma8(%s) = %s at A*1e9 = %.6f, '
+                        'cannot continue.' % (_stype, sigma8_g, As1e9))
                 As1e9 = As1e9 * sigma8*sigma8/sigma8_g/sigma8_g
+                if np.abs(sigma8_g - sigma8) <= abserr:
+                    break
+            else:
+                raise CEmulatorFallbackError(
+                    'sigma8 -> As iteration did not converge in %d steps: '
+                    'sigma8(%s) = %.6f, target = %.6f.'
+                    % (maxiter, _stype, sigma8_g, sigma8))
             if self.verbose:
                 print('The As is set to %.6e (sigma8=%.6f) to match the input sigma8=%.6f.'%(cosmos['A']*1e-9, sigma8_g, sigma8)) 
         else:
@@ -172,10 +194,11 @@ class CBaseEmulator:
                                          % (ikey, cosmos[ikey], self.param_limits[ikey][1]))
                     else:
                         if fallback_verbose:
-                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
-                                          'falling back to CAMB.'
-                                          % (cosmos[ikey], self.param_limits[ikey][0],
-                                             self.param_limits[ikey][1]), UserWarning)
+                            self._warn_fallback(
+                                'Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                'falling back to CAMB.'
+                                % (cosmos[ikey], self.param_limits[ikey][0],
+                                   self.param_limits[ikey][1]))
                         self._fallback_mode = True
                 elif np.any(cosmos[ikey] < self.param_limits[ikey][0]):
                     if not fallback_to_camb:
@@ -183,10 +206,11 @@ class CBaseEmulator:
                                          % (ikey, cosmos[ikey], self.param_limits[ikey][0]))
                     else:
                         if fallback_verbose:
-                            warnings.warn('Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
-                                          'falling back to CAMB.'
-                                          % (cosmos[ikey], self.param_limits[ikey][0],
-                                             self.param_limits[ikey][1]), UserWarning)
+                            self._warn_fallback(
+                                'Parameter A*1e9 = %.4f out of range [%.4f, %.4f], '
+                                'falling back to CAMB.'
+                                % (cosmos[ikey], self.param_limits[ikey][0],
+                                   self.param_limits[ikey][1]))
                         self._fallback_mode = True
         ### set the cosmology class
         self.Cosmo.set_cosmos(cosmos)
@@ -200,9 +224,52 @@ class CBaseEmulator:
 
         # Pre-compute CAMB cache if in fallback mode
         if self._fallback_mode:
-            self._camb_results_cache = self.get_camb_results(non_linear='mead2020', z=self.zlists[::-1])
+            self._camb_results_cache = self._get_camb_results_guarded(non_linear='mead2020', z=self.zlists[::-1])
         else:
             self._camb_results_cache = None
+
+    def _warn_fallback(self, msg):
+        '''
+        Emit the CAMB-fallback warning at most once per emulator instance.
+
+        Python's warnings machinery stores every distinct message text in the
+        module-level ``__warningregistry__`` under the "default" filter. In an
+        MCMC chain each step has unique parameter values, so warning on every
+        call leaks one registry entry per step. Warning only once keeps memory
+        bounded while still informing the user that fallback was triggered.
+
+        Args:
+            msg : str, warning message to emit on the first fallback.
+        '''
+        if self._fallback_warned:
+            return
+        warnings.warn(msg, UserWarning)
+        self._fallback_warned = True
+
+    def _warn_extrap(self, key, msg):
+        '''Emit an extrapolation warning once per key per instance.'''
+        if key in self._extrap_warned:
+            return
+        warnings.warn(msg, UserWarning)
+        self._extrap_warned.add(key)
+
+    def _get_pcalc(self, z, kind='tot'):
+        """Return (kcalc, P(k)) for the sigma_R integral at one redshift.
+
+        get_bias_mass asks for sigma 18 times per call but only a few distinct
+        (z, kind) pairs, and each miss costs 20 GP predictions plus a spline
+        fit, so this memo removes most of that. _sync_cosmologies drops it.
+        """
+        z = float(np.atleast_1d(z)[0])
+        key = (kind, z)
+        if key not in self._pcalc_cache:
+            kcalc = np.logspace(-4.99, 1.99, 1000)
+            if kind == 'cb':
+                pcalc = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
+            else:
+                pcalc = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
+            self._pcalc_cache[key] = (kcalc, pcalc)
+        return self._pcalc_cache[key]
 
     def _sync_cosmologies(self):
         '''
@@ -225,13 +292,43 @@ class CBaseEmulator:
         # Clear cache state when cosmology changes
         self._fallback_mode      = False
         self._camb_results_cache = None
+        self._camb_z_cache       = None
         self._cosmo_class_cache  = None
+        self._pcalc_cache        = {}
 
     def _get_cosmo_class_cache(self):
         """Lazy-init CLASS cache. Computed on first use, reused thereafter."""
         if self._cosmo_class_cache is None:
             self._cosmo_class_cache = self.get_cosmo_class(kmax=100)
         return self._cosmo_class_cache
+
+    def _get_camb_results_guarded(self, z=None, non_linear=None, kmax=10):
+        '''
+        Run CAMB and translate any failure into CEmulatorFallbackError carrying
+        the offending parameter set, so a sampler can reject the point instead of
+        dying on a bare CAMBError.
+        '''
+        try:
+            return self.get_camb_results(z=z, non_linear=non_linear, kmax=kmax)
+        except Exception as e:
+            _p = ', '.join('%s=%.6g' % (n, v)
+                           for n, v in zip(self.param_names, self.cosmologies[0]))
+            raise CEmulatorFallbackError('CAMB failed for {%s}: %s' % (_p, e)) from e
+
+    def _get_camb_z_results(self, z):
+        '''
+        Single-redshift CAMB results for the current cosmology, memoized per z.
+
+        get_sigma_z needs a results object built for exactly one redshift so that
+        z_indices=0 is that redshift, and _get_dlns_dlnR asks for the same z three
+        times, so the per-z objects are reused until _sync_cosmologies drops them.
+        '''
+        key = float(z)
+        if self._camb_z_cache is None:
+            self._camb_z_cache = {}
+        if key not in self._camb_z_cache:
+            self._camb_z_cache[key] = self._get_camb_results_guarded(key)
+        return self._camb_z_cache[key]
                                 
     def get_cosmo_class(self, z=None, non_linear=None, kmax=10, neutrino_mass_split=None):
         '''
@@ -288,6 +385,9 @@ class CBaseEmulator:
         if neutrino_mass_split is None:
             neutrino_mass_split = self.neutrino_mass_split
         z = check_z(self.zlists,     z, verbose=self.verbose)
+        if np.any(z > 3.0) or np.any(z < 0.0):
+            self._warn_extrap('z', 'z=%s is outside the trained range [0, 3]; the linear '
+                                   'P(k) spline extrapolates there (reported once).' % (z,))
         # k = checkdata(self.Bkcb.klist, k, dname='wavenumber')
 
         if self._fallback_mode:
@@ -370,8 +470,8 @@ class CBaseEmulator:
 
         if self._fallback_mode:
             # CAMB nonlinear results have extra internal redshift sampling;
-            # recompute fresh with just the requested z for correct indexing.
-            _cr = self.get_camb_results(z)
+            # use the single-redshift object so z_indices=0 is the requested z.
+            _cr = self._get_camb_z_results(z)
             sigma = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
                                    var1='delta_tot', var2='delta_tot')
             return sigma
@@ -399,16 +499,16 @@ class CBaseEmulator:
             sigma = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                             var1='delta_tot', var2='delta_tot')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 1000)
-            pcalc    = self.get_pklin(z, kcalc, Pcb=False, type='Emulator')[0]
+            kcalc, pcalc = self._get_pcalc(z, kind='tot')
+            klog     = np.log(kcalc)
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma    = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, klog)) 
             else:
-                sigma = np.zeros(len(R))
-                for iR in range(len(R)):
-                    W_R      = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                kr    = np.asarray(R, dtype=float)[:, None] * kcalc[None, :]
+                W_R   = 3*(np.sin(kr) - kr*np.cos(kr))/kr**3
+                rows  = pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi
+                sigma = np.sqrt(trapz(rows, klog, axis=1))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma
@@ -433,8 +533,8 @@ class CBaseEmulator:
 
         if self._fallback_mode:
             # CAMB nonlinear results have extra internal redshift sampling;
-            # recompute fresh with just the requested z for correct indexing.
-            _cr = self.get_camb_results(z)
+            # use the single-redshift object so z_indices=0 is the requested z.
+            _cr = self._get_camb_z_results(z)
             sigma_cb = _cr.get_sigmaR(R=R, z_indices=0, hubble_units=True,
                                       var1='delta_nonu', var2='delta_nonu')
             return sigma_cb
@@ -470,16 +570,16 @@ class CBaseEmulator:
             sigma_cb = camb_results.get_sigmaR(R=R, z_indices=zind, hubble_units=True,
                                                var1='delta_nonu', var2='delta_nonu')
         elif type == 'Emulator':
-            kcalc    = np.logspace(-4.99, 1.99, 1000)
-            pcalc    = self.Pkcblin.get_pkcbLin(z, kcalc)[0]
+            kcalc, pcalc = self._get_pcalc(z, kind='cb')
+            klog     = np.log(kcalc)
             if np.isscalar(R):
                 W_R      = 3*(np.sin(kcalc*R) - kcalc*R*np.cos(kcalc*R))/(kcalc*R)**3
-                sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc))) 
+                sigma_cb = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, klog)) 
             else:
-                sigma_cb = np.zeros(len(R))
-                for iR in range(len(R)):
-                    W_R          = 3*(np.sin(kcalc*R[iR]) - kcalc*R[iR]*np.cos(kcalc*R[iR]))/(kcalc*R[iR])**3
-                    sigma_cb[iR] = np.sqrt(trapz(pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi, np.log(kcalc)))
+                kr       = np.asarray(R, dtype=float)[:, None] * kcalc[None, :]
+                W_R      = 3*(np.sin(kr) - kr*np.cos(kr))/kr**3
+                rows     = pcalc*W_R*W_R*kcalc*kcalc*kcalc/2/np.pi/np.pi
+                sigma_cb = np.sqrt(trapz(rows, klog, axis=1))
         else:
             raise ValueError('Type %s not supported yet.'%type)
         return sigma_cb
@@ -559,7 +659,6 @@ class Pkmm_CEmulator(CBaseEmulator):
             verbose : bool, whether to output the running information
         '''
         super().__init__(verbose=verbose, neutrino_mass_split=neutrino_mass_split)
-        self.Bkcb            = Bkcb_gp(verbose=verbose) 
         self.Bkcb_halofit    = Bkcb_halofit_gp(verbose=verbose) 
         self.Bkcb_lin2hmcode = Bkcb_lin2hmcode_gp(verbose=verbose)
         self.Bkcb_hmcode2020 = Bkcb_hmcode2020_gp(verbose=verbose)
@@ -577,7 +676,6 @@ class Pkmm_CEmulator(CBaseEmulator):
         ''' 
         super()._sync_cosmologies()
         ##### pass the cosmologies (normalized) to other class
-        self.Bkcb.ncosmo            = self.ncosmo
         self.Bkcb_halofit.ncosmo    = self.ncosmo
         self.Bkcb_lin2hmcode.ncosmo = self.ncosmo
         self.Bkcb_hmcode2020.ncosmo = self.ncosmo
@@ -700,7 +798,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                                                                     hubble_units=True, k_hunit=True)
             pkhalofit = pkfunc.P(z,k)
         else:
-            raise ValueError('Type %s not supported yet.'%type) 
+            raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                             "or 'CAMB'." % (lintype,))
         return pkhalofit
     
     def get_pkHMCODE2020(self, z=None, k=None, Pcb=False, lintype='Emulator', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
@@ -764,7 +863,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                                                                     hubble_units=True, k_hunit=True)
             pkhmcode = pkfunc.P(z,k)
         else:
-            raise ValueError('Type %s not supported yet.'%type) 
+            raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                             "or 'CAMB'." % (lintype,))
         return pkhmcode 
       
     def get_pknl(self, z=None, k=None, Pcb=False, lintype='Emulator', nltype='hmcode2020', cosmo_class=None, camb_results=None, neutrino_mass_split=None):
@@ -772,10 +872,9 @@ class Pkmm_CEmulator(CBaseEmulator):
         Get the nonlinear power spectrum.
         
         .. note::
-           For now, nltype = 'hmcode2020', 'halofit' can give a better result than nltype = 'linear'.
+           nltype = 'hmcode2020' or 'halofit' select the nonlinear ratio model.
            For nltype = 'halofit' or 'hmcode2020', we only use the 'Emulator' method to generate the halofit Pk for consistency between trainning and output data.
            The lintype only determine which method to generate the neutrino linear Pk.
-           For nltype = 'linear', lintype determine which method to generate the linear cb and mm Pk.
            Because the agreements of linear Pk between CAMB, CLASS and Emulator is better than 0.5%.
         
         Args:
@@ -783,7 +882,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             k           : float or array-like, wavenumber [h/Mpc]. 
             Pcb         : bool, whether to output the total power spectrum (if False [default]) or the cb power spectrum (if True).
             lintype     : string, use 'Emulator', 'CLASS' or 'CAMB' method to generate linear Pk. Default is 'Emulator'.
-            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.  means ratio of nonlinear to **nltype** power spectrum. Default is 'hmcode2020'.
+            nltype      : string, 'halofit' or 'hmcode2020'.  means ratio of nonlinear to **nltype** power spectrum. Default is 'hmcode2020'.
             cosmo_class : CLASS object, if type is 'CLASS', then you can provide the CLASS object directly to avoid the repeated calculation for CLASS.
             camb_results: CAMB results, if type is CAMB, then you can provide the CAMB object directly to avoid the repeated calculation for CAMB. 
         Return:
@@ -807,19 +906,21 @@ class Pkmm_CEmulator(CBaseEmulator):
                 pknl = self.Tkmmhmcode2020.get_Tkmmhmcode2020(z=z, k=k) * pknl
             return pknl
 
-        k = checkdata(self.Bkcb.klist, k, dname='wavenumber', verbose=self.verbose)
+        k = checkdata(self.Bkcb_hmcode2020.klist, k, dname='wavenumber', verbose=self.verbose)
+        if np.any(k > 10.0):
+            self._warn_extrap('k', 'k=%s extends beyond the trained 10 h/Mpc; the nonlinear '
+                                   'ratio is extrapolated in log-log (reported once).'
+                              % (np.max(k),))
         ## get the nonlinear transfer for Pcb
-        if   nltype == 'linear':
-            Bkpred = self.Bkcb.get_Bk(z, k)
-        elif nltype == 'halofit':
+        if nltype == 'halofit':
             Bkpred = self.Bkcb_halofit.get_Bk(z, k)
         elif nltype == 'hmcode2020':
             Bkpred = self.Bkcb_hmcode2020.get_Bk(z, k)
+        else:
+            raise ValueError("nltype %r not supported yet; use 'halofit' or "
+                             "'hmcode2020'." % (nltype,))
         if Pcb or np.isclose(self.Cosmo.Omeganu, 0, atol=1e-10):
-            if   nltype == 'linear':
-                ## get the linear power spectrum for cb
-                pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
-            elif nltype == 'halofit':
+            if nltype == 'halofit':
                 ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                 ## get the halofit power spectrum for cb
                 pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', cosmo_class=cosmo_class, camb_results=camb_results, neutrino_mass_split='single')
@@ -838,11 +939,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
             fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM    
             if lintype == 'CLASS':
-                if nltype == 'linear':
-                    if (cosmo_class is None):
-                        cosmo_class = self._get_cosmo_class_cache()
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, cosmo_class=cosmo_class, neutrino_mass_split='single')
-                elif nltype == 'halofit':
+                if nltype == 'halofit':
                     if (cosmo_class is None):
                         cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
@@ -868,13 +965,11 @@ class Pkmm_CEmulator(CBaseEmulator):
                 else:
                     raise ValueError('This should not happen!')
             elif lintype == 'CAMB':
-                if nltype == 'linear':
+                if nltype == 'halofit':
                     if (camb_results is None):
-                        camb_results = self.get_camb_results(z, non_linear=None)
-                    pkcblin  = self.get_pklin(z, k, Pcb=True, type=lintype, camb_results=camb_results, neutrino_mass_split='single')
-                elif nltype == 'halofit':
-                    if (camb_results is None):
-                        cosmo_class = self._get_cosmo_class_cache()  # not use class halofit
+                        # halofit below is always taken from the emulator, so what
+                        # we need here is the CAMB object for the neutrino term
+                        camb_results = self.get_camb_results(z, non_linear='takahashi')
                     ## for consistency, we use the cb halofit power spectrum only from my Emulator for the nonlinear emulation
                     pkcblin  = self.get_pkhalofit(z, k, Pcb=True, lintype='Emulator', camb_results=camb_results, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
@@ -889,9 +984,7 @@ class Pkmm_CEmulator(CBaseEmulator):
                     pknunulin = pkfunc.P(z, k)
                     pknl      = fcb2M*fcb2M*pkcbnl + fnu2M*fnu2M*pknunulin + 2*fnu2M*fcb2M*np.sqrt(pkcbnl*pknunulin) 
             elif lintype == 'Emulator':
-                if nltype == 'linear':
-                    pkcblin = self.get_pklin(z, k, Pcb=True, type=lintype, neutrino_mass_split='single')
-                elif nltype == 'halofit':
+                if nltype == 'halofit':
                     pkcblin = self.get_pkhalofit(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
                 elif nltype == 'hmcode2020':
                     pkcblin = self.get_pkHMCODE2020(z, k, Pcb=True, lintype=lintype, neutrino_mass_split='single')
@@ -904,7 +997,8 @@ class Pkmm_CEmulator(CBaseEmulator):
                 else:
                     raise ValueError('This should not happen!')
             else:
-                raise ValueError('Type %s not supported yet.'%type) 
+                raise ValueError("lintype %r not supported yet; use 'Emulator', 'CLASS' "
+                                 "or 'CAMB'." % (lintype,))
             ######## for the neutrino mass split
             if neutrino_mass_split == 'single':
                 pknl = pknl
@@ -931,7 +1025,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             k           : float or array-like, wavenumber [h/Mpc].
             Pcb         : bool, whether to output the cb power spectrum (if True)
                           or the total power spectrum (if False [default]).
-            nltype      : string, 'linear', 'halofit' or 'hmcode2020'.
+            nltype      : string, 'halofit' or 'hmcode2020'.
                           The reference power spectrum for the nonlinear ratio.
                           Default is 'hmcode2020'.
         Return:
@@ -1121,6 +1215,13 @@ class HMF_CEmulator(CBaseEmulator):
     '''
     The halo mass function emulator class.
     '''
+    _HMF_ATTRS = {'RockstarM200m': 'HMFRockstarM200m',
+                  'FoFM200c': 'HMFFoFM200c',
+                  'FoFM200m': 'HMFFoFM200m',
+                  'RockstarMvir': 'HMFRockstarMvir',
+                  'RockstarMvir_bound': 'HMFRockstarMvirb'}
+    _fd_eps = 1e-3 # a 1% mass step must move n(>M) by more than this fraction
+
     def __init__(self, verbose=False, neutrino_mass_split='single'):
         '''
         Initialize the halo mass function emulator class.
@@ -1136,7 +1237,10 @@ class HMF_CEmulator(CBaseEmulator):
         self.HMFRockstarMvirb = HMFRockstarMvir_bound_gp(verbose=verbose)
         self.bhmRockstarM200m = bhmRockstarM200m_gp (verbose=verbose)
         self._mass_from_lgden_interp_cache = {}
-        self._interp_cache = {}   # key: (massdef, diff), value: spline callable
+        self._interp_cache = {}   # key: (massdef, diff), value: (spline callable, addnum)
+        self._fd_warned = False
+        self._zero_den_warned = False
+        self._lgden_warned = False
     
     def _sync_cosmologies(self):
         super()._sync_cosmologies()
@@ -1189,45 +1293,61 @@ class HMF_CEmulator(CBaseEmulator):
         self._mass_from_lgden_interp_cache[massdef] = interpolator
         return interpolator
     
-    def _2d_interp(self, ypred, diff=False, massdef='RockstarM200m'):
+    def _fd_ok(self, den_p, den_m):
+        '''
+        Mask of mass bins where the +-1% finite difference keeps enough
+        significant digits.
+
+        n(>M) barely changes over the step beyond the exponential cutoff, so
+        the difference of two nearly equal numbers is dominated by interpolation
+        noise and dividing by it turns a tiny error into inf/NaN.
+        '''
+        ok = (den_m - den_p) > self._fd_eps * den_m
+        if not np.all(ok) and not self._fd_warned:
+            warnings.warn('Finite difference in halo mass is ill conditioned for '
+                          'some bins (n(>M) barely changes over the 1% step); '
+                          'those bins fall back to the tree/Castro23 value.',
+                          UserWarning)
+            self._fd_warned = True
+        return ok
+
+    def _warn_zero_density(self, caller, mass, z):
+        '''
+        Report a mass bin whose number density is zero, at most once.
+
+        These bins are a legitimate outcome of the cumulative HMF underflowing,
+        but an MCMC step would print one line per bin per redshift.
+        '''
+        if not self.verbose or self._zero_den_warned:
+            return
+        print('warning: M=%.2e has zero number density at z=%.2f, <%s> returns zero '
+              'for that mass bin (further messages suppressed).' % (mass, z, caller))
+        self._zero_den_warned = True
+
+    def _get_hmf_gp(self, massdef):
+        '''Return the gp object backing a mass definition.'''
+        try:
+            return getattr(self, self._HMF_ATTRS[massdef])
+        except KeyError:
+            raise ValueError('Mass definition %s is not supported. For now only support [%s].'
+                             % (massdef, ', '.join(self._HMF_ATTRS)))
+
+    def _2d_interp(self, ypred=None, diff=False, massdef='RockstarM200m'):
         '''
         2D interpolation for the cumlative halo mass function.
+
+        ``ypred`` may be omitted: it is only needed on a cache miss, and
+        computing it means 10 GP predictions, so the hit path stays cheap.
         '''
         cache_key = (massdef, diff)
         if cache_key in self._interp_cache:
             return self._interp_cache[cache_key]
-        if massdef == 'RockstarM200m':
-            Delta = 200
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarM200m.mhmin_ind
-            mhmax_ind = self.HMFRockstarM200m.mhmax_ind
-            m_edges   = self.HMFRockstarM200m.m_edges
-        elif massdef == 'FoFM200c':
-            Delta = 200
-            rho_type = 'critical'
-            mhmin_ind = self.HMFFoFM200c.mhmin_ind
-            mhmax_ind = self.HMFFoFM200c.mhmax_ind
-            m_edges   = self.HMFFoFM200c.m_edges
-        elif massdef == 'FoFM200m':
-            Delta = 200
-            rho_type = 'matter'
-            mhmin_ind = self.HMFFoFM200m.mhmin_ind
-            mhmax_ind = self.HMFFoFM200m.mhmax_ind
-            m_edges   = self.HMFFoFM200m.m_edges
-        elif massdef == 'RockstarMvir':
-            Delta = "vir"
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarMvir.mhmin_ind
-            mhmax_ind = self.HMFRockstarMvir.mhmax_ind
-            m_edges   = self.HMFRockstarMvir.m_edges
-        elif massdef == 'RockstarMvir_bound':
-            Delta = "vir"
-            rho_type = 'matter'
-            mhmin_ind = self.HMFRockstarMvirb.mhmin_ind
-            mhmax_ind = self.HMFRockstarMvirb.mhmax_ind
-            m_edges   = self.HMFRockstarMvirb.m_edges
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, RockstarMvir, RockstarMvir_bound\].'%massdef)
+        hmfobj = self._get_hmf_gp(massdef)
+        if ypred is None:
+            ypred = hmfobj.get_data()
+        mhmin_ind = hmfobj.mhmin_ind
+        mhmax_ind = hmfobj.mhmax_ind
+        m_edges   = hmfobj.m_edges
         m_edges_l = np.logspace(10, 17, 140+1)
         mcen_l    = 10**((np.log10(m_edges_l[1:]) + np.log10(m_edges_l[:-1]))/2)
         dlgM_l    = np.log10(m_edges_l[1]) - np.log10(m_edges_l[0])
@@ -1249,21 +1369,22 @@ class HMF_CEmulator(CBaseEmulator):
             # for numerical differentiation, we use a smaller step than the one for interpolation to get a smoother result.
             dlgM_s = 1e-3 
             dlnM_s = dlgM_s * np.log(10)
-            addnum = 1 - np.min(ypred_)
+            fdoff = 1 - np.min(ypred_)
             ypred_new = np.zeros_like(ypred_)
             for iz in range(len(self.zlists)):
-                Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+addnum), kind='cubic', fill_value='extrapolate')
-                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_s/2)-addnum - 10**Nfunc(np.log10(mcen_l)+dlgM_s/2)+addnum) / dlnM_s 
-            self.addnum = 1 - np.min(ypred_new)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l), \
-                                                         np.log10(ypred_new[::-1,:]+self.addnum), kx=1, ky=1)(z, np.log10(M))
+                Nfunc = interp1d(np.log10(m_edges_l[:-1]), np.log10(ypred_[iz,:]+fdoff), kind='cubic', fill_value='extrapolate')
+                ypred_new[iz,:] = (10**Nfunc(np.log10(mcen_l)-dlgM_s/2)-fdoff - 10**Nfunc(np.log10(mcen_l)+dlgM_s/2)+fdoff) / dlnM_s 
+            addnum = 1 - np.min(ypred_new)
+            rbs = RectBivariateSpline(self.zlists[::-1], np.log10(mcen_l),
+                                      np.log10(ypred_new[::-1,:]+addnum), kx=1, ky=1)
         else:
-            self.addnum = 1 - np.min(ypred_)
-            spline = lambda z,M: 10**RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]), \
-                                                         np.log10(ypred_[::-1,:]+self.addnum), kx=1, ky=3)(z, np.log10(M))
-        # Save the spline function to the cache
-        self._interp_cache[cache_key] = spline
-        return spline
+            addnum = 1 - np.min(ypred_)
+            rbs = RectBivariateSpline(self.zlists[::-1], np.log10(m_edges_l[:-1]),
+                                      np.log10(ypred_[::-1,:]+addnum), kx=1, ky=3)
+        # the spline is built once here; a cache hit must not re-fit it
+        spline = lambda z, M, _rbs=rbs: 10**_rbs(z, np.log10(M))
+        self._interp_cache[cache_key] = (spline, addnum)
+        return spline, addnum
     
     def _get_massdef_Delta(self, z, Pcb=True, Delta=200, rho_type='matter'):
         if Pcb:
@@ -1467,19 +1588,8 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M = np.atleast_1d(M)
-        if massdef == 'RockstarM200m':
-            ypred_ = self.HMFRockstarM200m.get_data()
-        elif massdef == 'FoFM200c':
-            ypred_ = self.HMFFoFM200c.get_data()
-        elif massdef == 'FoFM200m':
-            ypred_ = self.HMFFoFM200m.get_data()    
-        elif massdef == 'RockstarMvir':
-            ypred_ = self.HMFRockstarMvir.get_data()
-        elif massdef == 'RockstarMvir_bound':
-            ypred_ = self.HMFRockstarMvirb.get_data()
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        cumhmf = self._2d_interp(ypred_, massdef=massdef)(z=z, M=M) - self.addnum
+        spline, addnum = self._2d_interp(massdef=massdef)
+        cumhmf = spline(z=z, M=M) - addnum
         return cumhmf * V * 1e-9
 
     def get_dndlnM(self, z=None, M=None, massdef='RockstarM200m'):
@@ -1495,19 +1605,8 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M = np.atleast_1d(M)
-        if massdef == 'RockstarM200m':
-            ypred_ = self.HMFRockstarM200m.get_data()
-        elif massdef == 'FoFM200c':
-            ypred_ = self.HMFFoFM200c.get_data()
-        elif massdef == 'FoFM200m':
-            ypred_ = self.HMFFoFM200m.get_data()
-        elif massdef == 'RockstarMvir':
-            ypred_ = self.HMFRockstarMvir.get_data()
-        elif massdef == 'RockstarMvir_bound':
-            ypred_ = self.HMFRockstarMvirb.get_data()
-        else:
-            raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
-        dndlnM = self._2d_interp(ypred_, diff=True, massdef=massdef)(z=z, M=M) - self.addnum
+        spline, addnum = self._2d_interp(diff=True, massdef=massdef)
+        dndlnM = spline(z=z, M=M) - addnum
         return dndlnM * 1e-9
 
     def get_bias_Castro23(self, z=None, M=None, Pcb=True, revisted=True, massdef='RockstarMvir'):
@@ -1557,8 +1656,28 @@ class HMF_CEmulator(CBaseEmulator):
         return bias[:,::-1]
     
     def get_mass_from_lgden(self, z=None, lgden=None, massdef="RockstarM200m"):
+        '''
+        Get the mass threshold for a given log10 number density threshold.
+
+        Args:
+            z      : float or array-like, redshift
+            lgden  : float or array-like, log10 of the number density [Mpc/h]^-3,
+                     must be strictly increasing
+            massdef : string, the mass definition used in the emulator
+        '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         lgden = np.atleast_1d(lgden)
+        if lgden.size > 1 and np.any(np.diff(lgden) <= 0):
+            raise ValueError(
+                'lgden must be strictly increasing, got %s. The cumulative number '
+                'density falls as the mass threshold rises, so callers that build '
+                'lgden from an ascending M grid must reverse it first.' % (lgden,))
+        # the tabulated grid spans [-8, -1]; outside it the spline extrapolates
+        if (np.any(lgden < -8) or np.any(lgden > -1)) and not self._lgden_warned:
+            warnings.warn('lgden %s is outside the tabulated range [-8, -1]; the mass '
+                          'threshold is extrapolated there (reported once).' % (lgden,),
+                          UserWarning)
+            self._lgden_warned = True
         interp_func = self._get_mass_from_lgden_interp(massdef)
         return interp_func(z, lgden)
     
@@ -1620,10 +1739,14 @@ class HMF_CEmulator(CBaseEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_bias_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_bias_mass', im, z[iz])
             bias1p = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1p)[0] * pbs1p[iz,valid]
             bias1m = bhmobj.get_bias_ratio(z=z[iz], lgden=lgden1m)[0] * pbs1m[iz,valid]
-            out[iz,valid] = (bias1p * den1p_valid - bias1m * den1m_valid) / (den1p_valid - den1m_valid)
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_diff = np.where(ok, den1p_valid - den1m_valid, 1.0)
+            out[iz,valid] = np.where(ok,
+                                     (bias1p * den1p_valid - bias1m * den1m_valid) / den_diff,
+                                     pbs1p[iz,valid])
         return out[:,::-1] # invert the order of mass to match the input mass order
             
 ####### class for the matter power spectrum emulator
@@ -1690,12 +1813,14 @@ class Pkhm_CEmulator(HMF_CEmulator):
         '''
         z = check_z(self.zlists, z, verbose=self.verbose)
         M  = np.atleast_1d(M)
-        lgdens = np.log10(self.get_Nhalo(z=z, M=M, massdef=massdef)) # len(z), len(M)
+        # get_Nhalo is cumulative so lgden decreases with M; reverse to satisfy
+        # the ascending-lgden contract of get_pkhm_lgnbar_threshold, then undo.
+        lgdens = np.log10(self.get_Nhalo(z=z, M=M, massdef=massdef))[:,::-1] # len(z), len(M)
         pkhm   = np.zeros((len(M), len(z), len(k))) 
         for iz in range(len(z)):
             # len(M), len(k) squeeze the z dimension
             pkhm[:,iz] = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgdens[iz,:], massdef=massdef, Pcb=Pcb)[:,0,:] 
-        return pkhm # len(M), len(z), len(k)
+        return pkhm[::-1,:,:] # len(M), len(z), len(k), invert M order to match input order
     
     def get_pkhm_mass(self, z=None, k=None, M=None, massdef='RockstarM200m', Pcb=True):
         '''
@@ -1732,10 +1857,15 @@ class Pkhm_CEmulator(HMF_CEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_pkhm_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_pkhm_mass', im, z[iz])
             pkhm1p = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1p, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
             pkhm1m = self.get_pkhm_lgnbar_threshold(z=z[iz], k=k, lgden=lgden1m, massdef=massdef, Pcb=Pcb)[:,0,:]  # (n_M, n_k)
-            out[valid,iz,:] = (pkhm1p * den1p_valid[:,None] - pkhm1m * den1m_valid[:,None]) / (den1p_valid[:,None] - den1m_valid[:,None])
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_p  = den1p_valid[:,None]
+            den_m  = den1m_valid[:,None]
+            numer  = pkhm1p * den_p - pkhm1m * den_m
+            den_diff = np.where(ok[:,None], den_p - den_m, 1.0)
+            out[valid,iz,:] = np.where(ok[:,None], numer / den_diff, pkhm1p)
         return out[::-1,:,:]  # invert M order to match input order
         
            
@@ -1758,7 +1888,7 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
         super()._sync_cosmologies()
         self.BrhmRockstarM200m.ncosmo = self.ncosmo
         # clear cache
-        self.BkhmRockstarM200m._Brhm_interp = None
+        self.BrhmRockstarM200m._Brhm_interp = None
     
     def _get_xihm_lgnbar_threshold_tree(self, z=None, r=None, lgden=None, massdef='RockstarM200m', Pcb=True):
         '''
@@ -1871,10 +2001,16 @@ class Xihm_CEmulator(Pkhm_CEmulator,Ximm_CEmulator):
             lgden1m = np.log10(den1m_valid)
             if not np.all(valid):
                 for im in M[~valid]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
+                    self._warn_zero_density('get_xihm_mass', im, z[iz])
             xihm1p = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1p)[:,0] * ximm_emu[iz][None,:]
             xihm1m = Brhmobj.get_Brhm(z=z[iz], r=r, lgden=lgden1m)[:,0] * ximm_emu[iz][None,:] # len(M), len(r) squeeze the z dimension
-            xihm_dire[valid,iz] = (xihm1p * den1p_valid[:,None] - xihm1m * den1m_valid[:,None]) / (den1p_valid[:,None] - den1m_valid[:,None])
+            ok     = self._fd_ok(den1p_valid, den1m_valid)
+            den_p  = den1p_valid[:,None]
+            den_m  = den1m_valid[:,None]
+            numer  = xihm1p * den_p - xihm1m * den_m
+            den_diff = np.where(ok[:,None], den_p - den_m, 1.0)
+            xihm_dire[valid,iz] = np.where(ok[:,None], numer / den_diff,
+                                           xihm_tree[::-1][valid,iz])
         xihm_dire = xihm_dire[::-1,:,:] # invert the order of mass to match the input mass order
         rswitch   = 40.0 # Mpc/h
         wsmooth   = np.exp(-(r/rswitch)**4)
@@ -2020,6 +2156,8 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
         den2p = (self.get_Nhalo(z=z, M=M2p, massdef=massdef))[:,::-1]   
         den2m = (self.get_Nhalo(z=z, M=M2m, massdef=massdef))[:,::-1]   
         xi_dire = np.zeros((len(M1), len(M2), len(z), len(r)))
+        xi_tree = self._get_xihh_mass_tree(z=z, r=r, M1=M1, M2=M2, massdef=massdef)
+        xi_tree_rev = xi_tree[::-1,::-1,:,:] # same reversed mass order as den1p/den1m
         for iz in range(len(z)):
             valid1  = (den1p[iz] > 0) & (den1m[iz] > 0) 
             valid2  = (den2p[iz] > 0) & (den2m[iz] > 0)
@@ -2027,12 +2165,10 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
             lgden1m = np.log10(den1m[iz,valid1])
             lgden2p = np.log10(den2p[iz,valid2])
             lgden2m = np.log10(den2m[iz,valid2])
-            if self.verbose and not np.all(valid1):
-                for im in M1[~valid1]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
-            if self.verbose and not np.all(valid2):
-                for im in M2[~valid2]:
-                    print("warning: M=%.2e get zero number density at z=%.2f, <get_xihm_mass> return zero for this mass bin."%(im, z[iz]))
+            for im in M1[~valid1]:
+                self._warn_zero_density('get_xihh_mass(M1)', im, z[iz])
+            for im in M2[~valid2]:
+                self._warn_zero_density('get_xihh_mass(M2)', im, z[iz])
              
             xihhpp = self.Xihh.get_xihh(z=z[iz], r=r, lgden1=lgden1p, lgden2=lgden2p)[:,:,0]
             xihhmm = self.Xihh.get_xihh(z=z[iz], r=r, lgden1=lgden1m, lgden2=lgden2m)[:,:,0]
@@ -2045,9 +2181,13 @@ class Xihh_CEmulator(HMF_CEmulator): #, Pkmm_CEmulator
             numer  = xihhpp * denpp[:,:,None] + xihhmm * denmm[:,:,None] \
                    - xihhpm * denpm[:,:,None] - xihhmp * denmp[:,:,None] # shape (len(M1), len(M2), len(r))
             denom  = denpp + denmm - denpm - denmp # shape (len(M1), len(M2))
-            xi_dire[:,:,iz][np.ix_(valid1,valid2)] = numer / denom[:,:,None] # shape (len(M1), len(M2), len(r))
+            okm    = self._fd_ok(den1p[iz][valid1], den1m[iz][valid1])[:,None] \
+                   & self._fd_ok(den2p[iz][valid2], den2m[iz][valid2])[None,:]
+            denom_safe = np.where(okm, denom, 1.0)
+            xi_dire[:,:,iz][np.ix_(valid1,valid2)] = np.where(
+                okm[:,:,None], numer / denom_safe[:,:,None],
+                xi_tree_rev[np.ix_(valid1,valid2)][:,:,iz]) # shape (len(M1), len(M2), len(r))
         xi_dire = xi_dire[::-1,::-1,:,:] # back to original order, since den decrease with M increase
-        xi_tree = self._get_xihh_mass_tree(z=z, r=r, M1=M1, M2=M2, massdef=massdef)
         
         rswitch = 40.0 # Mpc/h
         wsmooth = np.exp(-(r/rswitch)**4)[None,None,None,:]
@@ -2358,7 +2498,16 @@ class GalaxyEmulator(Xihm_CEmulator):
     def _sync_cosmologies(self):
         """Sync all sub-emulator cosmologies and clear galaxy caches."""
         super()._sync_cosmologies()
+        if self._xihh_emu is not None:
+            self._xihh_emu.cosmologies = self.cosmologies
+            self._xihh_emu.Cosmo       = self.Cosmo
+            self._xihh_emu._sync_cosmologies()
         if self._galaxy_calc is not None:
+            # Omegam is the cb component and is frozen into SatelliteProfile at
+            # construction, so refresh both before the grids are rebuilt.
+            _om = getattr(self.Cosmo, 'Omegam', 0.315)
+            self._galaxy_calc.Omegam = _om
+            self._galaxy_calc.satellite_profile.Omegam = _om
             self._galaxy_calc.clear_cosmology_cache()
 
     @property
@@ -2432,15 +2581,21 @@ class GalaxyEmulator(Xihm_CEmulator):
 
         # Initialize galaxy stats calculator
         from .emulator.GalaxyStats import GalaxyStatsCalculator
-        self._galaxy_calc = GalaxyStatsCalculator(
-            hmf_emu=self,
-            xihm_emu=self,
-            xihh_emu=self.Xihh,
-            mass_def='RockstarM200m',
-            Omegam=getattr(self.Cosmo, 'Omegam', 0.315), # Only cb component
-            zlists=self.zlists,
-            verbose=self.verbose
-        )
+        if self._galaxy_calc is None:
+            self._galaxy_calc = GalaxyStatsCalculator(
+                hmf_emu=self,
+                xihm_emu=self,
+                xihh_emu=self.Xihh,
+                mass_def='RockstarM200m',
+                Omegam=getattr(self.Cosmo, 'Omegam', 0.315), # Only cb component
+                zlists=self.zlists,
+                verbose=self.verbose
+            )
+        else:
+            # the calculator keeps no HOD state -- every compute_* call receives
+            # the model and parameters -- so a new HOD only needs its caches
+            # dropped, not the cosmology grids rebuilt
+            self._galaxy_calc.clear_cache()
 
         if self.verbose:
             print(f"HOD model set to {model_name} with parameters: {hod_params}")

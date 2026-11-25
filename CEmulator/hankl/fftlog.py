@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.special import gamma
+from scipy.special import gamma, loggamma
 from .preprocess import preprocess
 
 
@@ -28,21 +28,20 @@ def _gamma_term(mu, x, cutoff=200.0):
 
     imag_x = np.imag(x)
 
+    # gamma has poles at x = mu + 1 + 2k for integer k >= 0, where the ratio is 0
+    n_pole   = (np.real(x) - (mu + 1.0)) / 2.0
+    is_pole  = (imag_x == 0.0) & (n_pole >= 0) & (n_pole == np.floor(n_pole))
+    asym_m   = np.absolute(imag_x) > cutoff
+    good_m   = (~asym_m) & (~is_pole)
+
     g_m = np.zeros(x.size, dtype=complex)
 
-    asym_x = x[np.absolute(imag_x) > cutoff]
+    asym_x = x[asym_m]
     asym_plus = (mu + 1 + asym_x) / 2.0
     asym_minus = (mu + 1 - asym_x) / 2.0
 
-    x_good = x[(np.absolute(imag_x) <= cutoff) & (x != mu + 1.0 + 0.0j)]
-
-    alpha_plus = (mu + 1.0 + x_good) / 2.0
-    alpha_minus = (mu + 1.0 - x_good) / 2.0
-
-    g_m[(np.absolute(imag_x) <= cutoff) & (x != mu + 1.0 + 0.0j)] = gamma(alpha_plus)/gamma(alpha_minus)
-
     # high-order expansion
-    g_m[np.absolute(imag_x) > cutoff] = np.exp(
+    g_m[asym_m] = np.exp(
         (asym_plus - 0.5) * np.log(asym_plus)
         - (asym_minus - 0.5) * np.log(asym_minus)
         - asym_x
@@ -51,7 +50,16 @@ def _gamma_term(mu, x, cutoff=200.0):
         + 1.0 / 1260.0 * (1.0 / asym_plus ** 5.0 - 1.0 / asym_minus ** 5.0)
     )
 
-    g_m[np.where(x == mu + 1.0 + 0.0j)[0]] = 0.0 + 0.0j
+    alpha_plus = (mu + 1.0 + x[good_m]) / 2.0
+    alpha_minus = (mu + 1.0 - x[good_m]) / 2.0
+    with np.errstate(over='ignore', invalid='ignore'):
+        good = gamma(alpha_plus) / gamma(alpha_minus)
+    if not np.all(np.isfinite(good)):
+        bad = x[good_m][~np.isfinite(good)]
+        raise ValueError(
+            'The gamma ratio overflows in float64 for x=%s (mu=%g); '
+            'the FFTLog power-law bias q is too far from zero.' % (bad, mu))
+    g_m[good_m] = good
 
     return g_m
 
@@ -90,8 +98,23 @@ def _lowring_xy(mu, q, L, N, xy=1.0):
     x_plus = (mu + 1 + x) / 2.0
     x_minus = (mu + 1 - x) / 2.0
 
-    phip = np.imag(np.log(gamma(x_plus)))
-    phim = np.imag(np.log(gamma(x_minus)))
+    gp = gamma(x_plus)
+    gm = gamma(x_minus)
+    if np.isfinite(gp) and np.isfinite(gm) and gp != 0 and gm != 0:
+        phip = np.imag(np.log(gp))
+        phim = np.imag(np.log(gm))
+    else:
+        # gamma() overflows or underflows for a large imaginary part and log()
+        # then loses the phase; loggamma() carries it continuously. Only fall
+        # back there so the well conditioned path stays bit identical.
+        phip = np.imag(loggamma(x_plus))
+        phim = np.imag(loggamma(x_minus))
+
+    if not (np.isfinite(phip) and np.isfinite(phim)):
+        raise ValueError('_lowring_xy got non-finite phase (mu=%g, q=%g, N=%d).'
+                         % (mu, q, N))
+    if xy <= 0:
+        raise ValueError('_lowring_xy needs xy > 0, got %g.' % xy)
 
     arg = np.log(2.0 / xy) / delta_L + (phip - phim) / np.pi
     iarg = np.rint(arg)
@@ -138,6 +161,25 @@ def _u_m_term(m, mu, q, xy, L):
 
     u_m[m.size - 1] = np.real(u_m[m.size - 1])
 
+    return u_m
+
+
+# u_m depends only on the transform grid (mu, q, xy, L, N), not on the data, and
+# _gamma_term over N complex arguments is the bulk of each transform's cost.
+# The key set is tiny and bounded, so the cache cannot grow.
+_UM_CACHE = {}
+
+
+def _u_m_term_cached(m, mu, q, xy, L):
+    """Memoized :func:`_u_m_term`.
+
+    The returned array is shared; callers must not modify it in place.
+    """
+    key = (m.size, float(mu), float(q), float(xy), float(L))
+    u_m = _UM_CACHE.get(key)
+    if u_m is None:
+        u_m = _u_m_term(m, mu, q, xy, L)
+        _UM_CACHE[key] = u_m
     return u_m
 
 
@@ -193,11 +235,26 @@ def FFTLog(x, f_x, q, mu, xy=1.0, lowring=False, ext=0, range=None, return_ext=F
     if mu + 1.0 + q == 0.0:
         raise ValueError("The FFTLog Hankel Transform is singular when mu + 1 + q = 0.")
 
+    x = np.asarray(x)
+    f_x = np.asarray(f_x)
+    if x.ndim != 1 or x.size != f_x.size:
+        raise ValueError('x and f_x must be 1-D arrays of the same size, got %s and %s.'
+                         % (x.shape, f_x.shape))
+    if x.size < 2:
+        raise ValueError('FFTLog needs at least 2 samples, got %d.' % x.size)
+    if not np.all(np.isfinite(f_x)):
+        raise ValueError('f_x contains non-finite values; the transform would be meaningless.')
+    if np.any(x <= 0):
+        raise ValueError('x must be strictly positive for a logarithmic grid.')
+
     x, f_x, N_left, N_right = preprocess(x, f_x, ext=ext, range=range)
 
     N = f_x.size
-    delta_L = (np.log(np.max(x)) - np.log(np.min(x))) / float(N - 1)
+    if N % 2 != 0:
+        raise ValueError('FFTLog needs an even number of samples, got %d; the Nyquist '
+                         'term is paired with an N//2 grid.' % N)
     L = np.log(np.max(x)) - np.log(np.min(x))
+    delta_L = L / float(N - 1)
     log_x0 = np.log(x[N // 2])
     x0 = np.exp(log_x0)
 
@@ -215,7 +272,7 @@ def FFTLog(x, f_x, q, mu, xy=1.0, lowring=False, ext=0, range=None, return_ext=F
     id = m_shift
     y = 10 ** (s[id] / np.log(10))
 
-    u_m = _u_m_term(m, mu, q, xy, L)
+    u_m = _u_m_term_cached(m, mu, q, xy, L)
     b = c_m * u_m
 
     A_m = np.fft.irfft(b)

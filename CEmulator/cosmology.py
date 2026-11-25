@@ -12,6 +12,29 @@ _F_INTERPOLATOR = interp1d(_Y_GRID, _F_GRID, kind='cubic', bounds_error=False,
 _F_PRIME_INTERPOLATOR = interp1d(_Y_GRID, _F_PRIME_GRID, kind='cubic',
                                   bounds_error=False, fill_value=(0.0, float('inf')))
 
+_F_Y_MAX  = float(_Y_GRID[-1])
+_F_EDGE   = float(_F_GRID[-1])
+_FP_EDGE  = float(_F_PRIME_GRID[-1])
+
+
+def _fermi_F(y):
+    '''F(y), continued linearly past the table instead of returning inf.
+
+    F' saturates at the top of the table, so F keeps growing almost linearly;
+    returning inf there would silently poison Ez for m_nu beyond the emulator
+    range, which is exactly where an MCMC proposal lives.
+    '''
+    y = np.asarray(y, dtype=float)
+    out = _F_INTERPOLATOR(y)
+    over = y > _F_Y_MAX
+    return np.where(over, _F_EDGE + _FP_EDGE * (y - _F_Y_MAX), out)
+
+
+def _fermi_Fp(y):
+    '''F'(y), held at its saturated value past the table.'''
+    y = np.asarray(y, dtype=float)
+    return np.where(y > _F_Y_MAX, _FP_EDGE, _F_PRIME_INTERPOLATOR(y))
+
 # Critical density at z=0 in h^2 Msun / Mpc^3
 RHO_CRIT_0 = 2.77536627e11
 
@@ -103,9 +126,9 @@ class Cosmology:
             The value of F(y) or F'(y)
         '''
         if Fid == 0:
-            return float(_F_INTERPOLATOR(float(y)))
+            return float(_fermi_F(y))
         elif Fid == 1:
-            return float(_F_PRIME_INTERPOLATOR(float(y)))
+            return float(_fermi_Fp(y))
         else:
             raise ValueError("Fid must be 0 or 1.")
         
@@ -116,7 +139,7 @@ class Cosmology:
         if self.mnu != 0.0:
             y_vals = self.mnus[None,:] / (1+z[:,None]) / self.kB / T_nu
             # F_sumNu = np.asarray([self._F_y(y, Fid=0) for y in y_vals])
-            F_sumNu = np.sum(_F_INTERPOLATOR(y_vals), axis=1)   # one time interpolation for all y values
+            F_sumNu = np.sum(_fermi_F(y_vals), axis=1)   # one time interpolation for all y values
         else:
             F_sumNu = 0
         return fac * F_sumNu
@@ -185,17 +208,30 @@ class Cosmology:
         return self.OmegaL * de_exp / Ez**2 
     
     def comoving_distance(self, z, neutrino_matter_like=False):
-        '''
-        Get the comoving distance at redshift z.
+        r"""Return comoving radial distance in Mpc (without h).
 
-        Uses a single trapezoidal integration over a shared fine grid
-        so that the cost scales with one get_Ez call, not N individual quad calls.
+        .. math::
+            \chi(z) = \frac{c}{H_0}\int_{1/(1+z)}^1
+            \frac{da}{a^2 E(a)}.
 
-        Args:
-            z : float or array-like, redshift
-        Returns:
-            array-like : array of shape (len(z)), comoving distance in Mpc
-        '''
+        Parameters
+        ----------
+        z : float or array_like
+            Redshift.
+        neutrino_matter_like : bool, default=False
+            Treat massive neutrinos as matter at all redshifts.
+
+        Returns
+        -------
+        ndarray
+            Comoving distance [Mpc], with the shape of ``atleast_1d(z)``.
+
+        Notes
+        -----
+        A shared trapezoidal integral is cached for the current cosmology
+        and neutrino treatment. The 8192-point grid resolves the distance
+        to relative accuracy below 1e-6 in the regression test cosmologies.
+        """
         z = np.atleast_1d(z)
         # Build a fine, sorted grid of a from a_min to 1
         aarr = 1 / (1 + z)
@@ -207,8 +243,8 @@ class Cosmology:
 
         if (self._chi_interp is None) or (a_min < self._a_min_cached) or (self._neutrino_flag != neutrino_matter_like):
             a_low = min(a_min, 1e-5)
-            # ~2048 points gives sub-percent trapezoidal error for smooth integrands
-            n_grid = 2048
+            # Resolve the low-redshift integral to the 1e-6 accuracy contract.
+            n_grid = 8192
             a_grid = np.logspace(np.log10(a_low), 0, n_grid)
             # Evaluate 1/(E(a) * a^2) on the shared grid — one vectorized call
             z_grid = 1 / a_grid - 1
@@ -221,7 +257,9 @@ class Cosmology:
             # Prepend chi(a_N) = 0
             chi_at_grid = np.concatenate([cum, [0.0]])
             # Interpolate to the requested a values
-            self._chi_interp = lambda a: interp1d(np.log10(a_grid), (chi_at_grid), kind='cubic', assume_sorted=True)(np.log10(a))
+            chi_interp = interp1d(np.log10(a_grid), chi_at_grid,
+                                  kind='cubic', assume_sorted=True)
+            self._chi_interp = lambda a: chi_interp(np.log10(a))
             self._a_min_cached = a_low
             self._neutrino_flag = neutrino_matter_like
             

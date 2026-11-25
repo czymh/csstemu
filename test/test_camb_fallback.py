@@ -2,6 +2,7 @@
 import warnings
 warnings.filterwarnings('ignore')
 from CEmulator.Emulator import Pkmm_CEmulator
+from CEmulator import CEmulatorFallbackError
 import numpy as np
 
 # Test 1: Normal parameters - no fallback
@@ -97,6 +98,68 @@ with warnings.catch_warnings(record=True) as w:
     emu.set_cosmos(Omegab=0.049, Omegac=0.45, H0=67.66, sigma8=0.8,
                    sigma8type='CAMB')
 assert emu._fallback_mode == True, 'should be in fallback'
+print('PASS')
+
+print()
+print('=== Test 11: default sigma8type uses CAMB when out of bounds ===')
+_types = []
+_raw_s8 = emu.get_sigma8
+emu.get_sigma8 = lambda *a, **kw: (
+    _types.append(kw.get('type', a[0] if a else 'Emulator')), _raw_s8(*a, **kw))[1]
+emu.set_cosmos(Omegab=0.049, Omegac=0.45, H0=67.66, sigma8=0.81)
+emu.get_sigma8 = _raw_s8
+assert emu._fallback_mode == True, 'should be in fallback'
+assert len(_types) > 0, 'the sigma8 iteration never ran'
+assert set(_types) == {'CAMB'}, \
+    'out-of-bounds iteration must not extrapolate the emulator, used %s' % _types
+assert abs(emu.get_sigma8() - 0.81) < 1e-6, 'sigma8 did not converge'
+print('sigma8 types used inside the iteration: {}'.format(_types))
+print('PASS')
+
+print()
+print('=== Test 12: sigma8 target whose As lands outside [1.7, 2.5] ===')
+for _s8 in (0.70, 0.95):
+    emu.set_cosmos(Omegab=0.0486, Omegac=0.2604, H0=68.98, ns=0.9665,
+                   sigma8=_s8, w=-1.0, wa=0.0, mnu=0.06)
+    _A = emu.cosmologies[0][4]
+    _out = not (1.7 <= _A <= 2.5)
+    assert emu._fallback_mode == _out, 'fallback flag disagrees with the A bound'
+    assert abs(emu.get_sigma8() - _s8) < 1e-4, 'sigma8=%.3f did not converge' % _s8
+    print('sigma8=%.2f -> As*1e9=%.6f fallback=%s err=%.2e'
+          % (_s8, _A, emu._fallback_mode, abs(emu.get_sigma8() - _s8)))
+print('PASS')
+
+print()
+print('=== Test 13: CAMB failure becomes CEmulatorFallbackError ===')
+emu3 = Pkmm_CEmulator(verbose=False)
+try:
+    emu3.set_cosmos(Omegab=0.049, Omegac=0.25, H0=67.66, As=1.0e-7)
+    assert False, 'an absurd As must not silently succeed'
+except CEmulatorFallbackError as e:
+    assert isinstance(e, RuntimeError), 'must be catchable as RuntimeError'
+    assert e.__cause__ is not None, 'the original CAMB error must be chained'
+    assert 'Omegab=' in str(e), 'the message must carry the parameter set'
+    print('CEmulatorFallbackError, cause={}'.format(type(e.__cause__).__name__))
+print('PASS')
+
+print()
+print('=== Test 14: one CAMB run per redshift, not per sigma call ===')
+from CEmulator.Emulator import HMF_CEmulator
+emu4 = HMF_CEmulator(verbose=False)
+_ncamb = [0]
+_raw_camb = emu4.get_camb_results
+emu4.get_camb_results = lambda *a, **kw: (_ncamb.__setitem__(0, _ncamb[0]+1), _raw_camb(*a, **kw))[1]
+emu4.set_cosmos(Omegab=0.049, Omegac=0.45, H0=67.66, As=2.0e-9)
+_nset = _ncamb[0]
+_zs = np.array([0.0, 0.5, 1.0])
+_dn = emu4.get_dndlnM_Castro23(z=_zs, M=np.logspace(12, 15, 8), massdef='RockstarM200m')
+emu4.get_camb_results = _raw_camb
+assert np.all(np.isfinite(_dn)), 'dndlnM not finite'
+# each redshift needs 3 sigma calls (2 in _get_dlns_dlnR + 1 for sigma itself);
+# the per-z memo must collapse them onto a single CAMB run
+assert _ncamb[0] - _nset == len(_zs), \
+    'expected %d CAMB runs, got %d' % (len(_zs), _ncamb[0] - _nset)
+print('CAMB runs for %d redshifts: %d' % (len(_zs), _ncamb[0] - _nset))
 print('PASS')
 
 print()

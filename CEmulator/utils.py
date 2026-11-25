@@ -20,19 +20,35 @@ zlists = [3.00, 2.50, 2.00, 1.75, \
           1.50, 1.25, 1.00, 0.80, \
           0.50, 0.25, 0.10, 0.00]
 
+
+class CEmulatorFallbackError(RuntimeError):
+    '''
+    Raised when a parameter set cannot be turned into a usable cosmology: either
+    the CAMB fallback itself failed, or the sigma8 -> As iteration did not
+    converge.
+
+    Subclasses :py:class:`RuntimeError` so a sampler can catch it and assign a
+    zero likelihood, while the original CAMB exception stays on ``__cause__``.
+    '''
+    pass
+
+
 def check_z(zlists=zlists,z=None, verbose=False):
     if z is None:
         z = zlists[::-1]
-        print('No redshift input, using default redshifts [0,3]-12.')
+        if verbose:
+            print('No redshift input, using default redshifts [0,3]-12.')
     zinput = np.atleast_1d(np.copy(z))
     if np.any(zinput < np.min(zlists)) and verbose:
         warnings.warn('Redshift z is smaller than the lower limit %.2f.'%np.min(zlists))
     if np.any(zinput > np.max(zlists)) and verbose:
         warnings.warn('Redshift z is larger than the upper limit %.2f.'%np.max(zlists))
-    if (not np.all(np.diff(zinput) > 0.0))  and verbose:
-        # zinput.sort()
-        # print('Predicting redshifts (sorted):', zinput)
-        warnings.warn("Redshift must be increasing!")
+    if zinput.size > 1 and not np.all(np.diff(zinput) > 0.0):
+        # a descending z only surfaces later as scipy's "x must be strictly
+        # increasing when grid is True", which points at nothing
+        raise ValueError('Redshift must be strictly increasing, got %s. The emulator '
+                         'snapshots are stored in descending order, so any z derived '
+                         'from zlists must be reversed first.' % (zinput,))
     return zinput
     
 def checkdata(dlists, d=None, dname='wavenumber', verbose=False):
@@ -225,29 +241,28 @@ def compute_Rsigma_neff_C(Pklin):
     abstol = 1e-4
     xlogr1 = -2.0
     xlogr2 = 3.5
-    while True:
+    for _ in range(200):
         rmid = (xlogr2 + xlogr1) / 2.0
         rmid = 10 ** rmid
         sig, d1, d2 = WinInt(Pklin, rmid)
+        rneff = -3 - d1
+        rncur = -d2
         diff = sig - 1.0
         if abs(diff) <= abstol:
-            rknl = 1. / rmid
-            rneff = -3 - d1
-            rncur = -d2
             break
         elif diff >  abstol:
             xlogr1 = np.log10(rmid)
-        elif diff < -abstol:
+        else:
             xlogr2 = np.log10(rmid)
         if xlogr2 < -1.9999:
-            # is still linear, exit
+            # is still linear, exit with the last evaluation
             break
         elif xlogr1 > 3.4999:
             # Totally crazy non-linear
-            raise ValueError('Error in halofit')
-    neff = rneff
-    Curv = rncur
-    return rmid, neff, Curv
+            raise ValueError('Error in halofit: no linear scale with sigma(R) = 1.')
+    else:
+        raise ValueError('Error in halofit: the sigma(R) = 1 bisection did not converge.')
+    return rmid, rneff, rncur
 
 def PkHaloFit(k, pklin, R_sigma, Omegamz, OmegaLz, fnu, an, bn, cn, gamman, alphan, betan, mun, nun, h0):
     y = k * R_sigma
