@@ -436,15 +436,16 @@ def compare(tol, allows, verbose=False):
             (whitelisted if hit else bad).append(
                 (name, 'shape %s -> %s' % (a.shape, b.shape), hit or ''))
             continue
-        same_nan = np.array_equal(np.isnan(a), np.isnan(b))
+        same_special = all(np.array_equal(mask(a), mask(b))
+                           for mask in (np.isnan, np.isposinf, np.isneginf))
         fin = np.isfinite(a) & np.isfinite(b)
         denom = np.maximum(np.abs(a[fin]), 1e-300)
         rel = np.abs(b[fin] - a[fin]) / denom if fin.any() else np.array([0.0])
         absd = np.abs(b[fin] - a[fin]) if fin.any() else np.array([0.0])
-        ok = same_nan and (rel.max() <= tol or absd.max() <= tol)
+        ok = same_special and (rel.max() <= tol or absd.max() <= tol)
         if not ok:
-            msg = 'max rel %.3e / max abs %.3e / nan-pattern-equal %s' % (
-                rel.max(), absd.max(), same_nan)
+            msg = 'max rel %.3e / max abs %.3e / nonfinite-pattern-equal %s' % (
+                rel.max(), absd.max(), same_special)
             (whitelisted if hit else bad).append((name, msg, hit or ''))
 
     for name in sorted(set(berrs) | set(errs)):
@@ -465,9 +466,13 @@ def compare(tol, allows, verbose=False):
                   'callorder|callorder|callorder|co_%s_fresh' % tag)
         if ks in vals and kf in vals:
             a, b = vals[ks], vals[kf]
-            rel = np.max(np.abs(a / b - 1)) if np.all(np.isfinite(a)) and np.all(b != 0) else np.nan
+            finite = np.all(np.isfinite(a)) and np.all(np.isfinite(b))
+            rel = (np.max(np.abs(a - b) / np.maximum(np.abs(b), 1e-300))
+                   if finite and a.shape == b.shape else np.inf)
             if not (rel <= tol):
                 co_bad.append((tag, rel))
+        else:
+            co_bad.append((tag, np.inf))
 
     print('\n' + '=' * 74)
     print('arrays compared : %d' % len(set(bvals) & set(vals)))
@@ -500,8 +505,9 @@ def compare(tol, allows, verbose=False):
     print('\npeak RSS per group: %s' % ', '.join(
         '%s=%.0fMB' % (k, v) for k, v in sorted(rss.items())))
 
-    if bad:
-        print('\nFAIL: %d unwhitelisted regression(s)' % len(bad))
+    if bad or co_bad:
+        print('\nFAIL: %d unwhitelisted regression(s), %d call-order failure(s)'
+              % (len(bad), len(co_bad)))
         return 1
     print('\nPASS: no unwhitelisted regressions')
     return 0

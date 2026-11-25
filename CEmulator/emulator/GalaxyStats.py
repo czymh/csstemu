@@ -1841,10 +1841,12 @@ def compute_projected_correlation(rp, r, xi, pimax=100.0, n_pi=1000):
     r : array_like
         3D separation grid in Mpc/h (must be sorted)
     xi : array_like
-        3D correlation function on grid r, shape (len(r),) or (nz, len(r))
+        Dimensionless 3D correlation on grid r, shape (len(r),) or
+        (nz, len(r)). Outside the finite input support, xi is zero.
+        The input grid must cover any tails required by the application.
     pimax : float, default=100.0
         Maximum integration limit along line of sight in Mpc/h
-    n_pi : int, default=50
+    n_pi : int, default=1000
         Number of integration points along the LOS.
         Higher values improve accuracy at the cost of speed.
 
@@ -1869,6 +1871,7 @@ def compute_projected_correlation(rp, r, xi, pimax=100.0, n_pi=1000):
         valid = np.isfinite(xi[iz])
         # Shift xi to be positive for log interpolation
         addnum = - np.min(xi[iz][valid])+ 10.0
+        r_valid = np.asarray(r)[valid]
         logxi  = np.log10(xi[iz][valid] + addnum)
         xi_interp = interp1d(logr[valid], logxi, kind='linear',
                              bounds_error=False, fill_value=0)
@@ -1877,5 +1880,7 @@ def compute_projected_correlation(rp, r, xi, pimax=100.0, n_pi=1000):
             r_3d   = np.sqrt(rpi ** 2 + pi_arr ** 2)
             logr_3d = np.log10(r_3d)
             xi_arr  = 10.0 ** xi_interp(logr_3d) - addnum
+            # Zero extension applies to xi, not to its shifted logarithm.
+            xi_arr[(r_3d < r_valid[0]) | (r_3d > r_valid[-1])] = 0.0
             wp[iz, ir] = 2.0 * simpson(xi_arr, x=pi_arr)
     return wp[0] if squeeze_output else wp

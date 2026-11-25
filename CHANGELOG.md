@@ -4,9 +4,12 @@ All notable changes to CEmulator will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [2.2.0] - 2026-11-25
 
 ### Added
+
+- Weak-lensing `Cell.ipynb` example for source planes and source distributions, plus an examples index.
+- Snapshot-verdict tests and a direct xi_hh cosmology call-order guard, keeping the existing numerical baseline.
 
 - **CAMB fallback mechanism** (`fallback_to_camb=True` by default in `set_cosmos()`). When any cosmological parameter exceeds the GP emulator training range, the emulator automatically falls back to CAMB for computation instead of raising `ValueError`. Affected functions: `get_pklin`, `get_pknl`, `get_pkHMCODE2020`, `get_pkhalofit`, `get_sigma_z`, `get_sigma_cb_z`, `get_sigma8`, `get_sigma8_cb`.
 - **`fallback_verbose` parameter** (default `True`). Controls whether a `UserWarning` is emitted when falling back to CAMB.
@@ -24,6 +27,13 @@ All notable changes to CEmulator will be documented in this file.
 - New verification tests: `test/test_numerical_guards.py`, `test/test_error_handling.py`, `test/test_lazy_precompute.py`, `test/test_sigma_cache.py`.
 
 ### Fixed
+
+- Comoving distances now use an 8192-point shared integral, resolving the existing 1e-6 accuracy failures; the cubic interpolator is constructed once per cache build. This intentionally corrects distances and derived weak-lensing angular spectra.
+- Finite LOS projections now extend xi itself by zero outside the supplied radial support, instead of restoring a negative value from a zero-filled shifted logarithm. Negative correlations inside the support retain their sign.
+- The HOD test entry point now follows all test classes, so lensing and finite-projection checks are executed; their fixtures follow the current lazy-grid interfaces.
+
+- Snapshot comparisons now reject changed NaN/infinity patterns and fail on inconsistent or missing call-order pairs.
+- Public examples no longer depend on private simulation files or custom plotting styles; obsolete experiment notebooks and stored outputs were removed.
 
 - **`get_sigma_z()` and `get_sigma_cb_z()` CAMB path**: hardcoded `R=8.0` replaced with the actual `R` argument, so `type='CAMB'` now correctly returns `sigma(R)` for any smoothing scale, not just `R=8.0`.
 - **`get_pkHMCODE2020()` with `Pcb=False`**: when in CAMB fallback mode, `Pcb=False` now works correctly (previously raised `ValueError` in the Emulator path).

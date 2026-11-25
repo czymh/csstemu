@@ -165,6 +165,25 @@ class TestCosmologyConsistency(unittest.TestCase):
                         f"comoving_distance at z={z}: new={chi_new:.6f}, ref={chi_ref:.6f}, "
                         f"rel_error={rel_error:.2e}")
 
+    def test_distance_accuracy_and_cache_across_neutrino_modes(self):
+        """Distance remains accurate after cache reuse and neutrino-mode changes."""
+        z = np.array([1e-3, 0.1, 3.0, 1100.0])
+        for split in ('single', 'degenerate'):
+            cosmo = self._create_cosmo_reference(self.test_params[2], split)
+            for matter_like in (False, True, False):
+                with self.subTest(split=split, matter_like=matter_like):
+                    cosmo.comoving_distance(0.1, matter_like)
+                    actual = cosmo.comoving_distance(z, matter_like)
+                    reference = np.array([
+                        quad(lambda a: (
+                            1 / cosmo.get_Ez(1 / a - 1, matter_like)[0] / a**2),
+                            1 / (1 + zi), 1, epsabs=1e-11, epsrel=1e-11)[0]
+                        for zi in z]) * cosmo._chi_fac
+                    np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=0)
+                    np.testing.assert_array_equal(
+                        actual, cosmo.comoving_distance(z, matter_like))
+                    np.testing.assert_array_equal(cosmo.comoving_distance(0), [0.0])
+
 
 class TestPerformanceImprovement(unittest.TestCase):
     """Test that the optimization provides significant speedup."""
