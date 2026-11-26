@@ -113,6 +113,15 @@ class GalaxyStatsCalculator:
     # bounded to avoid unbounded memory growth in long chains.
     _HOD_CACHE_MAXSIZE = 16
 
+    @property
+    def Omegam(self):
+        """Compatibility alias for the cold-dark-matter plus baryon density."""
+        return self.Omegacb
+
+    @Omegam.setter
+    def Omegam(self, value):
+        self.Omegacb = value
+
     def __init__(self, hmf_emu, xihm_emu=None, xihh_emu=None,
                  mass_def='RockstarM200m', Omegam=0.315,
                  profile_type="xihm", concentration_model=concentration_duffy08,
@@ -122,7 +131,7 @@ class GalaxyStatsCalculator:
         self.xihm = xihm_emu
         self.xihh = xihh_emu
         self.mass_def = mass_def
-        self.Omegam = Omegam
+        self.Omegacb = Omegam
         self.verbose = verbose
 
         # Fixed mass grid for integrations (user specification)
@@ -135,7 +144,7 @@ class GalaxyStatsCalculator:
         self.satellite_profile = SatelliteProfile(
             profile_type=profile_type,
             concentration_model=concentration_model,
-            Omegam=self.Omegam
+            Omegam=self.Omegacb
         )
 
         # Bounded LRU cache for HOD weights (keyed by HOD model + parameters)
@@ -1577,7 +1586,7 @@ class GalaxyStatsCalculator:
             k, z, hod_model, **hod_params)
 
         rho_crit_0 = RHO_CRIT_0
-        rho_m0 = self.Omegam * rho_crit_0
+        rho_m0 = self.Omegacb * rho_crit_0
         factor = rho_m0 / 1e12
 
         def _transform(Pk):
@@ -1813,7 +1822,7 @@ class GalaxyStatsCalculator:
         # ΔΣ(R) = ρ̄_m × kernel [h Msun / Mpc²] → convert to h Msun / pc²
         # 1 Mpc² = 10¹² pc², so divide by 10¹²
         rho_crit_0 = RHO_CRIT_0 # h^2 Msun/Mpc^3 
-        rho_m0 = self.Omegam * rho_crit_0
+        rho_m0 = self.Omegacb * rho_crit_0
         ds = rho_m0 * ds_kernel / 1e12
 
         interp = interp1d(np.log(r_out), ds, kind='linear',

@@ -433,7 +433,7 @@ class CBaseEmulator:
             else:
                 pkcblin = self.Pkcblin.get_pkcbLin(z, k)
                 pknnlin = self.Pknn_cblin.get_pknn_cbLin(z, k) * pkcblin
-                fcb2M   = self.Cosmo.Omegam / self.Cosmo.OmegaM 
+                fcb2M   = self.Cosmo.Omegacb / self.Cosmo.OmegaM
                 fnu2M   = self.Cosmo.Omeganu / self.Cosmo.OmegaM
                 pklin   = fcb2M*fcb2M*pkcblin + fnu2M*fnu2M*pknnlin \
                         + 2*fcb2M*fnu2M*np.sqrt(pkcblin*pknnlin)
@@ -937,7 +937,7 @@ class Pkmm_CEmulator(CBaseEmulator):
             
         else:
             fnu2M = self.Cosmo.Omeganu / self.Cosmo.OmegaM
-            fcb2M = self.Cosmo.Omegam  / self.Cosmo.OmegaM    
+            fcb2M = self.Cosmo.Omegacb  / self.Cosmo.OmegaM
             if lintype == 'CLASS':
                 if nltype == 'halofit':
                     if (cosmo_class is None):
@@ -1388,16 +1388,16 @@ class HMF_CEmulator(CBaseEmulator):
     
     def _get_massdef_Delta(self, z, Pcb=True, Delta=200, rho_type='matter'):
         if Pcb:
-            Omegam_z = self.Cosmo.get_Omegam
+            Omega_m_z = self.Cosmo.get_Omegacb
         else:
-            Omegam_z = self.Cosmo.get_OmegaM
+            Omega_m_z = self.Cosmo.get_OmegaM
         if str(Delta) == "vir":
-            x = Omegam_z(z) - 1
+            x = Omega_m_z(z) - 1
             Delta = 18*np.pi**2 + 82*x - 39*x**2
-            Delta = Delta / Omegam_z(z)
+            Delta = Delta / Omega_m_z(z)
             return Delta
         if rho_type == "critical":
-            Delta = Delta / Omegam_z(z)
+            Delta = Delta / Omega_m_z(z)
         elif rho_type == "matter":
             Delta = Delta
         return Delta
@@ -1414,7 +1414,7 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         M = np.atleast_1d(M)
         if Pcb:
-            rho_m = self.Cosmo.rho_crit * self.Cosmo.Omegam ## h^{2}M_{sun}Mpc^{-3}
+            rho_m = self.Cosmo.rho_crit * self.Cosmo.Omegacb ## h^{2}M_{sun}Mpc^{-3}
         else:
             rho_m = self.Cosmo.rho_crit * self.Cosmo.OmegaM ## h^{2}M_{sun}Mpc^{-3}
         return (3*M/4/np.pi/rho_m)**(1/3)   # Mpc/h
@@ -1430,7 +1430,7 @@ class HMF_CEmulator(CBaseEmulator):
         '''
         z = np.atleast_1d(z)
         if Pcb:
-            Omega_m_zall = self.Cosmo.get_Omegam(z=z)
+            Omega_m_zall = self.Cosmo.get_Omegacb(z=z)
         else:
             Omega_m_zall = self.Cosmo.get_OmegaM(z=z)
         return (3/20 * (12*np.pi)**(2/3) * (1 + 0.0123*np.log10(Omega_m_zall)))
@@ -1483,7 +1483,7 @@ class HMF_CEmulator(CBaseEmulator):
         c0func = interp1d(ldelta, c0arr, fill_value="extrapolate")
         Delta  = self._get_massdef_Delta(z, Pcb=Pcb, Delta=Delta, rho_type=rho_type)
         if Pcb:
-            Omegacb   = self.Cosmo.Omegam # better to use the cb value for nuCDM universe
+            Omegacb   = self.Cosmo.Omegacb # better to use the cb value for nuCDM universe
             sigmafunc = self.get_sigma_cb_z
         else:
             Omegacb = self.Cosmo.OmegaM
@@ -1545,10 +1545,10 @@ class HMF_CEmulator(CBaseEmulator):
             else:
                 raise ValueError(r'Mass definition %s is not supported. For now only support \[RockstarM200m, FoFM200c, FoFM200m, RockstarMvir, RockstarMvir_bound\].'%massdef)
         if Pcb:
-            Omegamfunc = self.Cosmo.get_Omegam
-            rho_m      = self.Cosmo.rho_crit * self.Cosmo.Omegam ## h^{2}M_{sun}Mpc^{-3}
+            Omega_m_func = self.Cosmo.get_Omegacb
+            rho_m      = self.Cosmo.rho_crit * self.Cosmo.Omegacb ## h^{2}M_{sun}Mpc^{-3}
         else:
-            Omegamfunc = self.Cosmo.get_OmegaM
+            Omega_m_func = self.Cosmo.get_OmegaM
             rho_m      = self.Cosmo.rho_crit * self.Cosmo.OmegaM ## h^{2}M_{sun}Mpc^{-3}
         dndlnM = np.zeros((len(z), len(M)))
         if return_vars:
@@ -1557,12 +1557,12 @@ class HMF_CEmulator(CBaseEmulator):
         for iz in range(len(z)):
             dlnsdlnR = self._get_dlns_dlnR(z=z[iz], M=M, Pcb=Pcb)
             sigma    = self.get_sigma_cb_z(R=self._get_lagrangian_Radius(M=M, Pcb=Pcb), z=z[iz])
-            Omegamz  = Omegamfunc(z=z[iz])
+            Omega_m_z  = Omega_m_func(z=z[iz])
             nu       = self._get_delta_c(z=z[iz], Pcb=Pcb)[0]/sigma
             aR = a1 + a2*(dlnsdlnR+0.6125)*(dlnsdlnR+0.6125)
             qR = q1 + q2*(dlnsdlnR+0.5)
-            a  = aR * Omegamz**az
-            q  = qR * Omegamz**qz
+            a  = aR * Omega_m_z**az
+            q  = qR * Omega_m_z**qz
             p  = p1 + p2*(dlnsdlnR+0.5)
             A  = 1/((2**(-0.5-p+q/2)/np.sqrt(np.pi))*(2**p*gamma(0.5*q)+gamma(-p+0.5*q)))
             multiplicity = A*np.sqrt(2*a*nu*nu/np.pi)*np.exp(-0.5*a*nu*nu)*(1+1/((a*nu*nu)**p))*(np.sqrt(a)*nu)**(q-1)
@@ -2250,9 +2250,9 @@ class WeakLensingBaseEmulator(CBaseEmulator):
         nnew  = dndzfunc(znew)
         H0 = self.Cosmo.h0 * 100
         if Pcb:
-            Omegam = self.Cosmo.Omegam
+            Omega_m = self.Cosmo.Omegacb
         else:
-            Omegam = self.Cosmo.OmegaM
+            Omega_m = self.Cosmo.OmegaM
         kernel = np.zeros((len(chi)))
         if not hasattr(self, 'z2chi') or not hasattr(self, 'chi2z'):
             self.chi2z, self.z2chi = self._get_distance_interp(use_ccl=use_ccl)
@@ -2269,7 +2269,7 @@ class WeakLensingBaseEmulator(CBaseEmulator):
             if np.isclose(norm, 0, atol=1e-5):
                 kernel[ii] = 0
             else:
-                warr  = 3*H0*H0*Omegam/2/ai/vc/vc * (ichi*(chiz - ichi)/chiz) * dzarr[zind]*nnew[zind] # 1/Mpc/Mpc
+                warr  = 3*H0*H0*Omega_m/2/ai/vc/vc * (ichi*(chiz - ichi)/chiz) * dzarr[zind]*nnew[zind] # 1/Mpc/Mpc
                 kernel[ii] = np.sum(warr)/norm
         return kernel
 
@@ -2294,10 +2294,10 @@ class WeakLensingBaseEmulator(CBaseEmulator):
         chis = self.Cosmo.comoving_distance(z_s)
         H0   = self.Cosmo.h0 * 100
         if Pcb:
-            Omegam = self.Cosmo.Omegam
+            Omega_m = self.Cosmo.Omegacb
         else:
-            Omegam = self.Cosmo.OmegaM
-        return 3*H0*H0*Omegam/2/aarr/vc/vc * (chi*(chis - chi)/chis) # 1/Mpc/Mpc
+            Omega_m = self.Cosmo.OmegaM
+        return 3*H0*H0*Omega_m/2/aarr/vc/vc * (chi*(chis - chi)/chis) # 1/Mpc/Mpc
 
 ####### class for the convergence power spectrum emulator
 class Cell_CEmulator(Pkmm_CEmulator, WeakLensingBaseEmulator):
@@ -2503,11 +2503,11 @@ class GalaxyEmulator(Xihm_CEmulator):
             self._xihh_emu.Cosmo       = self.Cosmo
             self._xihh_emu._sync_cosmologies()
         if self._galaxy_calc is not None:
-            # Omegam is the cb component and is frozen into SatelliteProfile at
+            # Omegacb is the cb component and is frozen into SatelliteProfile at
             # construction, so refresh both before the grids are rebuilt.
-            _om = getattr(self.Cosmo, 'Omegam', 0.315)
-            self._galaxy_calc.Omegam = _om
-            self._galaxy_calc.satellite_profile.Omegam = _om
+            _om = getattr(self.Cosmo, 'Omegacb', 0.315)
+            self._galaxy_calc.Omegacb = _om
+            self._galaxy_calc.satellite_profile.Omegacb = _om
             self._galaxy_calc.clear_cosmology_cache()
 
     @property
@@ -2587,7 +2587,7 @@ class GalaxyEmulator(Xihm_CEmulator):
                 xihm_emu=self,
                 xihh_emu=self.Xihh,
                 mass_def='RockstarM200m',
-                Omegam=getattr(self.Cosmo, 'Omegam', 0.315), # Only cb component
+                Omegam=getattr(self.Cosmo, 'Omegacb', 0.315), # Only cb component
                 zlists=self.zlists,
                 verbose=self.verbose
             )

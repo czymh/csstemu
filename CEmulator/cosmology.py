@@ -40,6 +40,15 @@ RHO_CRIT_0 = 2.77536627e11
 
 class Cosmology:
 
+    @property
+    def Omegam(self):
+        """Compatibility alias for the cold-dark-matter plus baryon density."""
+        return self.Omegacb
+
+    @Omegam.setter
+    def Omegam(self, value):
+        self.Omegacb = value
+
     def __init__(self, verbose=False, neutrino_mass_split='single'):
         '''
         Initialize the CSST cosmology class.
@@ -86,7 +95,7 @@ class Cosmology:
         self.Omeganu  = self.mnu/93.14/self.h0/self.h0
         # total matter without massive neutrinos
         # Only baryons and cold dark matter
-        self.Omegam   = cosmologies['Omegam']  
+        self.Omegacb   = cosmologies['Omegam']
         self.Omegab   = cosmologies['Omegab']
         self.Omegac   = cosmologies['Omegam'] - cosmologies['Omegab']
         self.w0       = cosmologies['w']
@@ -97,8 +106,8 @@ class Cosmology:
         self.Gamma_nu = (4/11)**(1/3)
         self.f_nnu    = 7/8*(self.Gamma_nu**4)*self.Nur # neutrino radiation
         self.OmegaR   = self.Omegag*(1+self.f_nnu) # Total radiation
-        self.OmegaL   = 1 - self.Omegam - self.Omeganu - self.OmegaR
-        self.OmegaM   = self.Omegam + self.Omeganu
+        self.OmegaL   = 1 - self.Omegacb - self.Omeganu - self.OmegaR
+        self.OmegaM   = self.Omegacb + self.Omeganu
         self.TCMB     = 2.7255
         ##### Fix the curvature to be zero
         self.Omegak   = 0.0
@@ -161,13 +170,13 @@ class Cosmology:
                            self.OmegaR*(1+z)**4 +
                            self.OmegaL*de_exp)
         else:
-            return np.sqrt(self.Omegam*(1+z)**3 +
+            return np.sqrt(self.Omegacb*(1+z)**3 +
                         self._Omeganu_TimesHubbleSquare(z) +
                         self.Omegak*(1+z)**2 +
                         self.OmegaR*(1+z)**4 +
                         self.OmegaL*de_exp)
     
-    def get_Omegam(self, z):
+    def get_Omegacb(self, z):
         '''
         Get the total matter density without massive neutrinos at redshift z.
         
@@ -178,7 +187,9 @@ class Cosmology:
         '''
         z = np.atleast_1d(z)
         Ez = self.get_Ez(z)  # vectorized call to get_Ez for all z values
-        return self.Omegam * (1+z)**3 / Ez**2
+        return self.Omegacb * (1+z)**3 / Ez**2
+
+    get_Omegam = get_Omegacb
     
     def get_OmegaM(self, z):
         '''
