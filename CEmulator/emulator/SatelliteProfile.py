@@ -50,7 +50,8 @@ def R200_from_M(M, z, Omegam=0.315):
     R200 : float or ndarray
         R_200m in Mpc/h.
     """
-    rho_m_z = Omegam * RHO_CRIT_0 * 200.0 ## comoving rho (no (1+z)^3 factor for R200m)
+    Omegacb = Omegam
+    rho_m_z = Omegacb * RHO_CRIT_0 * 200.0 ## comoving rho (no (1+z)^3 factor for R200m)
     return (3.0 * M / (4 * np.pi * rho_m_z)) ** (1.0 / 3.0)
 
 
@@ -94,10 +95,19 @@ class SatelliteProfile:
         Omega_matter at z=0 (used for R200).
     """
 
+    @property
+    def Omegam(self):
+        """Compatibility alias for the cold-dark-matter plus baryon density."""
+        return self.Omegacb
+
+    @Omegam.setter
+    def Omegam(self, value):
+        self.Omegacb = value
+
     def __init__(self, profile_type='nfw', concentration_model=None,
                  Omegam=0.315, Rc=1.0, apodization_scale=None):
         self.profile_type = profile_type
-        self.Omegam = Omegam
+        self.Omegacb = Omegam
         self.Rc = Rc
         self.apodization_scale = apodization_scale
         self.concentration = concentration_model or concentration_duffy08
@@ -105,7 +115,7 @@ class SatelliteProfile:
 
     def R200(self, M, z):
         """R_200m in Mpc/h for halo mass *M* at redshift *z*."""
-        return R200_from_M(M, z, Omegam=self.Omegam)
+        return R200_from_M(M, z, Omegam=self.Omegacb)
 
     # ------------------------------------------------------------------
     # NFW profile
@@ -296,7 +306,7 @@ class SatelliteProfile:
         -------
         p_hm_dist : ndarray (n_k,) or (n_mass, n_k)
         """
-        rho_m = RHO_CRIT_0 * self.Omegam
+        rho_m = RHO_CRIT_0 * self.Omegacb
         R200 = np.atleast_1d(R200)
         squeeze = (xi_hm.ndim == 1)
         if squeeze:

@@ -102,7 +102,7 @@ class MyStandardScaler:
 
 def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0, neutrino_mass_split='single'):
     from classy import Class
-    param_names  = ['Omegab', 'Omegam', 'H0', \
+    param_names  = ['Omegab', 'Omegacb', 'H0', \
                    'ns', 'A', 'w', 'wa', 'mnu']
     para = {}
     for i_n in range(len(param_names)):
@@ -118,7 +118,7 @@ def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0, neutrino_mass_split=
         'wa_fld':    para['wa'],
         'w0_fld':    para['w'],
         'Omega_b':   para['Omegab'],
-        'Omega_cdm': para['Omegam'] - para['Omegab'],
+        'Omega_cdm': para['Omegacb'] - para['Omegab'],
         'Omega_Lambda': 0.0, 
         'z_pk': strzlists,
         'T_cmb': 2.7255,
@@ -149,14 +149,14 @@ def useCLASS(mypara, strzlists, non_linear=None, kmax=10.0, neutrino_mass_split=
 
 def useCAMB(mypara, zlists, kmax=10.0, non_linear=None, neutrino_mass_split='single'):
     import camb
-    param_names  = ['Omegab', 'Omegam', 'H0', \
+    param_names  = ['Omegab', 'Omegacb', 'H0', \
                    'ns', 'A', 'w', 'wa', 'mnu']
     para = {}
     for i_n in range(len(param_names)):
         para[param_names[i_n]] = mypara[i_n]
     h0 = para['H0']/100
     pars = camb.CAMBparams()
-    omch2 = (para['Omegam'] - para['Omegab'])*h0*h0; ombh2 = para['Omegab']*h0*h0
+    omch2 = (para['Omegacb'] - para['Omegab'])*h0*h0; ombh2 = para['Omegab']*h0*h0
     if para['mnu'] == 0:
         para['Nncdm'] = 0
     else:
